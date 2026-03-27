@@ -1,10 +1,7 @@
-// ══════════════════════════════════════════════════════════════
-// FlowOS – server.js  (salve como "server.js", não "server.js.js")
-// ══════════════════════════════════════════════════════════════
 import express    from 'express'
 import cors       from 'cors'
 import dotenv     from 'dotenv'
-import rateLimit  from 'express-rate-limit'   // ← import NO TOPO (ES Modules exige)
+import rateLimit  from 'express-rate-limit'
 
 import authRoutes       from './routes/auth.js'
 import dashboardRoutes  from './routes/dashboard.js'
@@ -21,7 +18,6 @@ dotenv.config()
 const app  = express()
 const PORT = process.env.PORT || 3001
 
-// ─── Middlewares ──────────────────────────────────────────
 app.use(cors({
   origin: process.env.FRONTEND_URL || 'http://localhost:5173',
   credentials: true
@@ -29,18 +25,26 @@ app.use(cors({
 app.use(express.json({ limit: '50mb' }))
 app.use(express.urlencoded({ extended: true, limit: '50mb' }))
 
-// ─── Rate Limiting ────────────────────────────────────────
-app.use('/auth', rateLimit({ windowMs: 15 * 60 * 1000, max: 20  }))
-app.use(         rateLimit({ windowMs: 15 * 60 * 1000, max: 200 }))
+// Rate limiters separados — /auth não conta no global
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  message: { error: 'Muitas tentativas. Aguarde 15 minutos.' }
+})
+const globalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 200,
+  skip: (req) => req.path.startsWith('/auth')
+})
+app.use('/auth', authLimiter)
+app.use(globalLimiter)
 
-// ─── Health check ─────────────────────────────────────────
 app.get('/health', (_req, res) =>
   res.json({ status: 'ok', version: '2.0.0', timestamp: new Date().toISOString() })
 )
 
-// ─── Rotas ────────────────────────────────────────────────
-app.use('/auth',       authRoutes)        // POST /auth/login   POST /auth/cadastro
-app.use('/dashboard',  dashboardRoutes)   // GET  /dashboard
+app.use('/auth',       authRoutes)
+app.use('/dashboard',  dashboardRoutes)
 app.use('/leads',      leadsRoutes)
 app.use('/kpis',       kpisRoutes)
 app.use('/mensagens',  mensagensRoutes)
@@ -49,12 +53,10 @@ app.use('/financeiro', financeiroRoutes)
 app.use('/rh',         rhRouter)
 app.use('/operacoes',  operacoesRoutes)
 
-// ─── Webhook N8N ─────────────────────────────────────────
 app.post('/webhook/n8n/:modulo', (req, res) =>
   res.json({ received: true, modulo: req.params.modulo })
 )
 
-// ─── Error handler ────────────────────────────────────────
 app.use((err, _req, res, _next) => {
   console.error('[ERRO]', err.message)
   res.status(500).json({
