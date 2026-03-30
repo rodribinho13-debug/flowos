@@ -81,7 +81,7 @@ export const dashboardApi = {
 export const kpisApi = {
   listar:     ()              => req('GET', '/kpis'),
   criar:      (dados)         => req('POST', '/kpis', dados),
-  atualizar:  (id, dados)     => req('PUT', `/kpis/${id}`, dados),
+  atualizar:  (id, dados)     => req('PATCH', `/kpis/${id}`, dados),
   deletar:    (id)            => req('DELETE', `/kpis/${id}`),
   registrar:  (id, dados)     => req('POST', `/kpis/${id}/registros`, dados),
 }

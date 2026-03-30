@@ -11,6 +11,33 @@ const router     = express.Router()
 const JWT_SECRET = process.env.JWT_SECRET || 'flowos_dev_secret'
 
 // ──────────────────────────────────────────────────────────────
+// Cache em memória para autenticar – evita DB hit em toda req
+// TTL: 60 s; máx 1000 entradas (previne leak de memória)
+// ──────────────────────────────────────────────────────────────
+const authCache = new Map()
+const AUTH_CACHE_TTL = 60_000   // 60 segundos
+const AUTH_CACHE_MAX = 1_000
+
+function cacheGet(id) {
+  const entry = authCache.get(id)
+  if (!entry) return null
+  if (Date.now() - entry.ts > AUTH_CACHE_TTL) { authCache.delete(id); return null }
+  return entry.data
+}
+
+function cacheSet(id, data) {
+  if (authCache.size >= AUTH_CACHE_MAX) {
+    // Remove a entrada mais antiga
+    authCache.delete(authCache.keys().next().value)
+  }
+  authCache.set(id, { data, ts: Date.now() })
+}
+
+export function invalidarCacheUsuario(id) {
+  authCache.delete(id)
+}
+
+// ──────────────────────────────────────────────────────────────
 // MIDDLEWARE – exportado e usado em TODOS os outros routes
 // ──────────────────────────────────────────────────────────────
 export async function autenticar(req, res, next) {
@@ -20,14 +47,22 @@ export async function autenticar(req, res, next) {
 
     const decoded = jwt.verify(token, JWT_SECRET)
 
-    // Confirma que o usuário ainda existe no banco
-    const { data: usuario, error } = await supabase
-      .from('usuarios')
-      .select('id, workspace_id, perfil, ativo')
-      .eq('id', decoded.id)
-      .single()
+    // Tenta cache antes de ir ao banco
+    let usuario = cacheGet(decoded.id)
 
-    if (error || !usuario || usuario.ativo === false)
+    if (!usuario) {
+      const { data, error } = await supabase
+        .from('usuarios')
+        .select('id, workspace_id, perfil, ativo')
+        .eq('id', decoded.id)
+        .single()
+
+      if (error || !data) return res.status(401).json({ error: 'Usuário não encontrado ou inativo.' })
+      usuario = data
+      cacheSet(decoded.id, usuario)
+    }
+
+    if (usuario.ativo === false)
       return res.status(401).json({ error: 'Usuário não encontrado ou inativo.' })
 
     req.usuario = { ...decoded, workspace_id: usuario.workspace_id }
@@ -42,12 +77,19 @@ export async function autenticar(req, res, next) {
 // ──────────────────────────────────────────────────────────────
 // POST /auth/cadastro
 // ──────────────────────────────────────────────────────────────
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
 router.post('/cadastro', async (req, res) => {
+  let workspace = null
   try {
-    const { nome_empresa, setor, nome, email, senha } = req.body
+    const { nome_empresa, setor, nome, senha } = req.body
+    const email = (req.body.email || '').toLowerCase().trim()
 
     if (!nome_empresa || !nome || !email || !senha)
       return res.status(400).json({ error: 'Preencha todos os campos obrigatórios.' })
+
+    if (!EMAIL_REGEX.test(email))
+      return res.status(400).json({ error: 'E-mail inválido.' })
 
     if (senha.length < 6)
       return res.status(400).json({ error: 'A senha precisa ter ao menos 6 caracteres.' })
@@ -64,13 +106,14 @@ router.post('/cadastro', async (req, res) => {
 
     // 2. Criar Workspace
     const slug = `${nome_empresa.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')}-${Date.now()}`
-    const { data: workspace, error: wsError } = await supabase
+    const { data: ws, error: wsError } = await supabase
       .from('workspaces')
       .insert({ nome: nome_empresa, slug, setor: setor || null })
       .select()
       .single()
 
     if (wsError) throw wsError
+    workspace = ws
 
     // 3. Criar usuário admin com senha criptografada
     const senhaHash = await bcrypt.hash(senha, 10)
@@ -103,7 +146,11 @@ router.post('/cadastro', async (req, res) => {
     })
   } catch (err) {
     console.error('[CADASTRO]', err.message)
-    res.status(500).json({ error: err.message })
+    // Rollback: remover workspace órfão se criação do usuário falhou
+    if (workspace?.id) {
+      await supabase.from('workspaces').delete().eq('id', workspace.id).catch(() => {})
+    }
+    res.status(500).json({ error: 'Erro ao criar conta. Tente novamente.' })
   }
 })
 
@@ -117,11 +164,12 @@ router.post('/login', async (req, res) => {
     if (!email || !senha)
       return res.status(400).json({ error: 'E-mail e senha são obrigatórios.' })
 
-    // 1. Buscar usuário com workspace
+    // 1. Buscar usuário com workspace (email normalizado)
+    const emailNorm = (email || '').toLowerCase().trim()
     const { data: usuario, error } = await supabase
       .from('usuarios')
       .select('id, nome, email, senha, perfil, workspace_id, ativo, workspaces(nome)')
-      .eq('email', email)
+      .eq('email', emailNorm)
       .maybeSingle()
 
     if (error || !usuario)
@@ -156,7 +204,7 @@ router.post('/login', async (req, res) => {
     })
   } catch (err) {
     console.error('[LOGIN]', err.message)
-    res.status(500).json({ error: err.message })
+    res.status(500).json({ error: 'Erro ao realizar login. Tente novamente.' })
   }
 })
 

@@ -30,8 +30,12 @@ app.use(express.json({ limit: '50mb' }))
 app.use(express.urlencoded({ extended: true, limit: '50mb' }))
 
 // ─── Rate Limiting ────────────────────────────────────────
-app.use('/auth', rateLimit({ windowMs: 15 * 60 * 1000, max: 20  }))
-app.use(         rateLimit({ windowMs: 15 * 60 * 1000, max: 200 }))
+// /auth tem limiter próprio; o geral ignora /auth para evitar double-limiting
+app.use('/auth', rateLimit({ windowMs: 15 * 60 * 1000, max: 20 }))
+app.use((req, res, next) => {
+  if (req.path.startsWith('/auth')) return next()
+  return rateLimit({ windowMs: 15 * 60 * 1000, max: 200 })(req, res, next)
+})
 
 // ─── Health check ─────────────────────────────────────────
 app.get('/health', (_req, res) =>
