@@ -209,6 +209,30 @@ router.post('/login', async (req, res) => {
 })
 
 // ──────────────────────────────────────────────────────────────
+// POST /auth/service-token
+// Gera token de longa duração (1 ano) para integrações (N8N, webhooks)
+// Requer autenticação de admin
+// ──────────────────────────────────────────────────────────────
+router.post('/service-token', autenticar, async (req, res) => {
+  try {
+    if (req.usuario.perfil !== 'admin')
+      return res.status(403).json({ error: 'Apenas administradores podem gerar tokens de serviço.' })
+
+    const { descricao = 'Token de serviço' } = req.body
+
+    const token = jwt.sign(
+      { id: req.usuario.id, workspace_id: req.usuario.workspace_id, perfil: 'service', descricao },
+      JWT_SECRET,
+      { expiresIn: '365d' }
+    )
+
+    res.json({ token, descricao, expira_em: '365 dias' })
+  } catch (err) {
+    res.status(500).json({ error: 'Erro ao gerar token de serviço.' })
+  }
+})
+
+// ──────────────────────────────────────────────────────────────
 // GET /auth/me  – retorna dados do usuário logado
 // ──────────────────────────────────────────────────────────────
 router.get('/me', autenticar, async (req, res) => {

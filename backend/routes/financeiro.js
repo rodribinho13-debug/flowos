@@ -385,6 +385,51 @@ export const rhRouter = (() => {
     return base * 0.275 - 896.00
   }
 
+  // ─── Exames ocupacionais ─────────────────────────────────────
+
+  // Listar funcionários com exame vencendo nos próximos X dias e não notificados
+  // Usado pelo N8N: GET /rh/exames/vencendo?dias=30
+  r.get('/exames/vencendo', autenticar, async (req, res) => {
+    try {
+      const { workspace_id } = req.usuario
+      const dias = parseInt(req.query.dias) || 30
+
+      const hoje  = new Date().toISOString().split('T')[0]
+      const limit = new Date(Date.now() + dias * 86_400_000).toISOString().split('T')[0]
+
+      const { data, error } = await supabase
+        .from('rh_funcionarios')
+        .select('id, nome, telefone, email, data_exame_vencimento, exame_notificado')
+        .eq('workspace_id', workspace_id)
+        .eq('status', 'ativo')
+        .gte('data_exame_vencimento', hoje)
+        .lte('data_exame_vencimento', limit)
+        .or('exame_notificado.is.null,exame_notificado.eq.false')
+        .order('data_exame_vencimento')
+
+      if (error) throw error
+      res.json(data || [])
+    } catch (err) { res.status(500).json({ error: err.message }) }
+  })
+
+  // Marcar exame como notificado
+  // Usado pelo N8N: PATCH /rh/exames/:id/notificado
+  r.patch('/exames/:id/notificado', autenticar, async (req, res) => {
+    try {
+      const { workspace_id } = req.usuario
+      const { data, error } = await supabase
+        .from('rh_funcionarios')
+        .update({ exame_notificado: true, data_notificacao_exame: new Date().toISOString() })
+        .eq('id', req.params.id)
+        .eq('workspace_id', workspace_id)
+        .select('id, nome, exame_notificado')
+        .single()
+
+      if (error) throw error
+      res.json({ success: true, funcionario: data })
+    } catch (err) { res.status(500).json({ error: err.message }) }
+  })
+
   // Gerar modelo planilha RH
   r.get('/modelo-planilha', autenticar, async (req, res) => {
     try {
