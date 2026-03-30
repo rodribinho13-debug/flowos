@@ -1,7 +1,8 @@
 import express from 'express'
 import supabase from '../services/supabase.js'
 import { autenticar } from './auth.js'
-import { gerarMensagemIA } from '../services/openai.js' // Corrigido o nome da função
+import { gerarMensagemIA } from '../services/openai.js'
+import { getWorkspaceConfig } from './configuracoes.js'
 import nodemailer from 'nodemailer'
 import dotenv from 'dotenv'
 
@@ -83,22 +84,30 @@ router.post('/whatsapp', autenticar, async (req, res) => {
     const { workspace_id } = req.usuario
     const { lead_id, numero, mensagem } = req.body
 
-    if (!process.env.EVOLUTION_API_URL || !process.env.EVOLUTION_API_KEY || !process.env.EVOLUTION_INSTANCE) {
-      return res.status(500).json({ error: 'Configuração da Evolution API ausente no .env' })
+    // Prioridade: config salva pelo cliente no banco; fallback para .env
+    const wsCfg = await getWorkspaceConfig(workspace_id)
+    const apiUrl      = wsCfg.evolution_api_url  || process.env.EVOLUTION_API_URL
+    const apiKey      = wsCfg.evolution_api_key   || process.env.EVOLUTION_API_KEY
+    const instance    = wsCfg.evolution_instance  || process.env.EVOLUTION_INSTANCE
+
+    if (!apiUrl || !apiKey || !instance) {
+      return res.status(500).json({ error: 'WhatsApp não configurado. Acesse Configurações → WhatsApp e preencha os dados da Evolution API.' })
     }
 
-    const evolutionUrl = `${process.env.EVOLUTION_API_URL}/message/sendText/${process.env.EVOLUTION_INSTANCE}`
-    const headers = { 'apikey': process.env.EVOLUTION_API_KEY, 'Content-Type': 'application/json' }
-    const body = { number: `${numero}@s.whatsapp.net`, text: mensagem }
+    const numeroLimpo  = String(numero).replace(/\D/g, '')
+    const numeroFmt    = numeroLimpo.startsWith('55') ? numeroLimpo : `55${numeroLimpo}`
+
+    const evolutionUrl = `${apiUrl.replace(/\/$/, '')}/message/sendText/${instance}`
+    const headers      = { apikey: apiKey, 'Content-Type': 'application/json' }
+    const body         = { number: `${numeroFmt}@s.whatsapp.net`, textMessage: { text: mensagem } }
 
     const response = await fetch(evolutionUrl, { method: 'POST', headers, body: JSON.stringify(body) })
-    const data = await response.json()
+    const data     = await response.json()
 
     if (!response.ok) throw new Error(data.message || 'Erro ao enviar WhatsApp')
 
-    // Registrar mensagem enviada
     await supabase.from('mensagens_enviadas').insert({
-      workspace_id, lead_id, canal: 'whatsapp', corpo: mensagem, status: 'enviado'
+      workspace_id, lead_id: lead_id || null, canal: 'whatsapp', corpo: mensagem, status: 'enviado'
     })
 
     res.json({ success: true, data })

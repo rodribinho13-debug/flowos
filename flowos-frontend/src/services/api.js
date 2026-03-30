@@ -192,6 +192,15 @@ export const exportApi = {
 }
 
 // ══════════════════════════════════════════════════════════════
+// CONFIGURAÇÕES
+// ══════════════════════════════════════════════════════════════
+export const configuracoesApi = {
+  whatsapp:        ()       => req('GET',  '/configuracoes/whatsapp'),
+  salvarWhatsapp:  (dados)  => req('POST', '/configuracoes/whatsapp', dados),
+  testarWhatsapp:  (dados)  => req('POST', '/configuracoes/whatsapp/testar', dados),
+}
+
+// ══════════════════════════════════════════════════════════════
 // HEALTH CHECK
 // ══════════════════════════════════════════════════════════════
 export const healthCheck = () =>
@@ -199,6 +208,7 @@ export const healthCheck = () =>
 
 export default {
   auth: authApi,
+  configuracoes: configuracoesApi,
   dashboard: dashboardApi,
   kpis: kpisApi,
   leads: leadsApi,

@@ -6,7 +6,8 @@ import cors       from 'cors'
 import dotenv     from 'dotenv'
 import rateLimit  from 'express-rate-limit'   // ← import NO TOPO (ES Modules exige)
 
-import authRoutes       from './routes/auth.js'
+import configuracoesRoutes from './routes/configuracoes.js'
+import authRoutes          from './routes/auth.js'
 import dashboardRoutes  from './routes/dashboard.js'
 import leadsRoutes      from './routes/leads.js'
 import kpisRoutes       from './routes/kpis.js'
@@ -43,7 +44,8 @@ app.get('/health', (_req, res) =>
 )
 
 // ─── Rotas ────────────────────────────────────────────────
-app.use('/auth',       authRoutes)        // POST /auth/login   POST /auth/cadastro
+app.use('/auth',          authRoutes)
+app.use('/configuracoes', configuracoesRoutes)        // POST /auth/login   POST /auth/cadastro
 app.use('/dashboard',  dashboardRoutes)   // GET  /dashboard
 app.use('/leads',      leadsRoutes)
 app.use('/kpis',       kpisRoutes)
