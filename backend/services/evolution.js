@@ -1,43 +1,72 @@
-import axios from 'axios'
+// ══════════════════════════════════════════════════════════════
+// FlowOS – services/evolution.js
+// Wrapper para a Evolution API (rodando no seu VPS)
+// URL e chave globais ficam no .env; instância é por workspace
+// ══════════════════════════════════════════════════════════════
 import dotenv from 'dotenv'
 dotenv.config()
 
-const evolution = axios.create({
-  baseURL: process.env.EVOLUTION_API_URL,
-  headers: {
-    'apikey': process.env.EVOLUTION_API_KEY,
-    'Content-Type': 'application/json'
-  }
-})
+function baseUrl()  { return (process.env.EVOLUTION_API_URL || '').replace(/\/$/, '') }
+function globalKey(){ return process.env.EVOLUTION_API_KEY || '' }
 
-export async function enviarWhatsApp(numero, mensagem) {
-  try {
-    const numeroLimpo = numero.replace(/\D/g, '')
-    const numeroFormatado = numeroLimpo.startsWith('55')
-      ? `${numeroLimpo}@s.whatsapp.net`
-      : `55${numeroLimpo}@s.whatsapp.net`
+function headers() {
+  return { 'apikey': globalKey(), 'Content-Type': 'application/json' }
+}
 
-    const { data } = await evolution.post(
-      `/message/sendText/${process.env.EVOLUTION_INSTANCE}`,
-      { number: numeroFormatado, text: mensagem }
-    )
+async function evFetch(method, path, body) {
+  const res = await fetch(`${baseUrl()}${path}`, {
+    method,
+    headers: headers(),
+    body: body ? JSON.stringify(body) : undefined,
+    signal: AbortSignal.timeout(10_000)
+  })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(data.message || data.error || `Evolution API ${res.status}`)
+  return data
+}
 
-    return { sucesso: true, data }
-  } catch (err) {
-    console.error('Erro Evolution API:', err.response?.data || err.message)
-    return { sucesso: false, erro: err.response?.data || err.message }
+// ── Criar instância para o workspace ─────────────────────────
+export async function criarInstancia(instanceName) {
+  return evFetch('POST', '/instance/create', {
+    instanceName,
+    qrcode: true,
+    integration: 'WHATSAPP-BAILEYS'
+  })
+}
+
+// ── Obter QR code (base64) ────────────────────────────────────
+export async function getQRCode(instanceName) {
+  return evFetch('GET', `/instance/connect/${instanceName}`)
+}
+
+// ── Status da conexão ─────────────────────────────────────────
+export async function getStatus(instanceName) {
+  const data = await evFetch('GET', `/instance/connectionState/${instanceName}`)
+  // Evolution v2: { instance: { state: 'open'|'close'|'connecting' } }
+  const state = data?.instance?.state || data?.state || 'unknown'
+  return {
+    conectado: state === 'open',
+    state,
+    raw: data
   }
 }
 
-export async function verificarStatus() {
-  try {
-    const { data } = await evolution.get(
-      `/instance/fetchInstances`
-    )
-    return data
-  } catch (err) {
-    return { erro: err.message }
-  }
+// ── Desconectar (logout) ──────────────────────────────────────
+export async function desconectarInstancia(instanceName) {
+  return evFetch('DELETE', `/instance/logout/${instanceName}`)
 }
 
-export default evolution
+// ── Deletar instância (ao excluir workspace) ──────────────────
+export async function deletarInstancia(instanceName) {
+  return evFetch('DELETE', `/instance/delete/${instanceName}`)
+}
+
+// ── Enviar texto ──────────────────────────────────────────────
+export async function enviarTexto(instanceName, numero, texto) {
+  const numeroLimpo = String(numero).replace(/\D/g, '')
+  const numeroFmt   = numeroLimpo.startsWith('55') ? numeroLimpo : `55${numeroLimpo}`
+  return evFetch('POST', `/message/sendText/${instanceName}`, {
+    number: `${numeroFmt}@s.whatsapp.net`,
+    textMessage: { text: texto }
+  })
+}

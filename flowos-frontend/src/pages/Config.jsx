@@ -48,13 +48,17 @@ export default function Config() {
   const apiUrl     = import.meta.env.VITE_API_URL || 'http://localhost:3001'
   const token      = localStorage.getItem('flowos_token') || ''
 
-  // ── WhatsApp config state ────────────────────────────────
-  const [waCfg, setWaCfg] = useState({ evolution_api_url: '', evolution_api_key: '', evolution_instance: '', rh_whatsapp_numero: '' })
-  const [waLoading,  setWaLoading]  = useState(false)
-  const [waTesting,  setWaTesting]  = useState(false)
-  const [waMsg,      setWaMsg]      = useState(null)   // { tipo: 'ok'|'erro', texto: '' }
-  const [waTestMsg,  setWaTestMsg]  = useState(null)
-  const [showApiKey, setShowApiKey] = useState(false)
+  // ── WhatsApp state ───────────────────────────────────────
+  const [waStatus,  setWaStatus]  = useState(null)   // { conectado, state, instance }
+  const [qrCode,    setQrCode]    = useState(null)
+  const [waLoading, setWaLoading] = useState(false)
+  const [waErro,    setWaErro]    = useState(null)
+
+  const carregarStatusWa = () => {
+    configuracoesApi.whatsapp()
+      .then(d => setWaStatus(d))
+      .catch(() => {})
+  }
 
   useEffect(() => {
     healthCheck()
@@ -62,35 +66,44 @@ export default function Config() {
       .catch(() => setSaude({ status: 'offline' }))
       .finally(() => setLoading(false))
 
-    configuracoesApi.whatsapp()
-      .then(d => d && setWaCfg({ evolution_api_url: d.evolution_api_url || '', evolution_api_key: d.evolution_api_key || '', evolution_instance: d.evolution_instance || '', rh_whatsapp_numero: d.rh_whatsapp_numero || '' }))
-      .catch(() => {})
+    carregarStatusWa()
   }, [])
 
-  const salvarWhatsapp = async (e) => {
-    e.preventDefault()
-    setWaMsg(null)
+  // Polling: re-verifica status a cada 5s enquanto QR code está visível
+  useEffect(() => {
+    if (!qrCode) return
+    const interval = setInterval(async () => {
+      try {
+        const s = await configuracoesApi.whatsappStatus()
+        if (s.conectado) { setQrCode(null); setWaStatus(s) }
+      } catch {}
+    }, 5000)
+    return () => clearInterval(interval)
+  }, [qrCode])
+
+  const gerarQRCode = async () => {
+    setWaErro(null)
     setWaLoading(true)
+    setQrCode(null)
     try {
-      await configuracoesApi.salvarWhatsapp(waCfg)
-      setWaMsg({ tipo: 'ok', texto: 'Configuração salva com sucesso!' })
+      const r = await configuracoesApi.whatsappQRCode()
+      if (r.conectado) { carregarStatusWa(); return }
+      setQrCode(r.qrcode)
     } catch (err) {
-      setWaMsg({ tipo: 'erro', texto: err.message })
+      setWaErro(err.message)
     } finally {
       setWaLoading(false)
     }
   }
 
-  const testarWhatsapp = async () => {
-    setWaTestMsg(null)
-    setWaTesting(true)
+  const desconectar = async () => {
+    if (!confirm('Deseja desconectar o WhatsApp?')) return
     try {
-      const r = await configuracoesApi.testarWhatsapp(waCfg)
-      setWaTestMsg({ tipo: r.conectado ? 'ok' : 'aviso', texto: r.message })
+      await configuracoesApi.whatsappDesconectar()
+      setQrCode(null)
+      carregarStatusWa()
     } catch (err) {
-      setWaTestMsg({ tipo: 'erro', texto: err.message })
-    } finally {
-      setWaTesting(false)
+      setWaErro(err.message)
     }
   }
 
@@ -215,96 +228,57 @@ export default function Config() {
         </div>
       </div>
 
-      {/* WhatsApp / Evolution API */}
+      {/* WhatsApp */}
       <div style={{ ...s.card, marginTop: 20 }}>
-        <div style={s.section}>💬 Configuração do WhatsApp (Evolution API)</div>
-        <p style={{ fontSize: 13, color: C.muted, marginBottom: 20, lineHeight: 1.6 }}>
-          Configure sua instância da Evolution API. Cada workspace pode ter sua própria conta de WhatsApp.
-          Os dados salvos aqui têm prioridade sobre as variáveis de ambiente do servidor.
-        </p>
+        <div style={s.section}>💬 WhatsApp</div>
 
-        <form onSubmit={salvarWhatsapp}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
-
-            {/* URL */}
-            <div>
-              <label style={{ ...s.label, display: 'block', marginBottom: 6 }}>URL da Evolution API *</label>
-              <input
-                style={{ width: '100%', padding: '10px 14px', background: C.surface2, border: `1px solid ${C.border}`, borderRadius: 10, color: C.text, fontSize: 14, fontFamily: 'inherit', boxSizing: 'border-box' }}
-                type="url" placeholder="https://api.seudominio.com" required
-                value={waCfg.evolution_api_url}
-                onChange={e => setWaCfg(v => ({ ...v, evolution_api_url: e.target.value }))}
-              />
-            </div>
-
-            {/* Instância */}
-            <div>
-              <label style={{ ...s.label, display: 'block', marginBottom: 6 }}>Nome da Instância *</label>
-              <input
-                style={{ width: '100%', padding: '10px 14px', background: C.surface2, border: `1px solid ${C.border}`, borderRadius: 10, color: C.text, fontSize: 14, fontFamily: 'inherit', boxSizing: 'border-box' }}
-                type="text" placeholder="minha-instancia" required
-                value={waCfg.evolution_instance}
-                onChange={e => setWaCfg(v => ({ ...v, evolution_instance: e.target.value }))}
-              />
-            </div>
-
-            {/* API Key */}
-            <div style={{ position: 'relative' }}>
-              <label style={{ ...s.label, display: 'block', marginBottom: 6 }}>Chave da API (apikey) *</label>
-              <input
-                style={{ width: '100%', padding: '10px 44px 10px 14px', background: C.surface2, border: `1px solid ${C.border}`, borderRadius: 10, color: C.text, fontSize: 14, fontFamily: 'inherit', boxSizing: 'border-box' }}
-                type={showApiKey ? 'text' : 'password'} placeholder="••••••••••••••••" required
-                value={waCfg.evolution_api_key}
-                onChange={e => setWaCfg(v => ({ ...v, evolution_api_key: e.target.value }))}
-              />
-              <button type="button" onClick={() => setShowApiKey(v => !v)}
-                style={{ position: 'absolute', right: 12, top: 36, background: 'none', border: 'none', cursor: 'pointer', color: C.muted, fontSize: 15 }}>
-                {showApiKey ? '🙈' : '👁️'}
-              </button>
-            </div>
-
-            {/* Número RH */}
-            <div>
-              <label style={{ ...s.label, display: 'block', marginBottom: 6 }}>Número do RH (resumo diário)</label>
-              <input
-                style={{ width: '100%', padding: '10px 14px', background: C.surface2, border: `1px solid ${C.border}`, borderRadius: 10, color: C.text, fontSize: 14, fontFamily: 'inherit', boxSizing: 'border-box' }}
-                type="text" placeholder="5511999999999"
-                value={waCfg.rh_whatsapp_numero}
-                onChange={e => setWaCfg(v => ({ ...v, rh_whatsapp_numero: e.target.value }))}
-              />
-              <span style={{ fontSize: 11, color: C.muted }}>DDI + DDD + número, sem espaços</span>
-            </div>
+        {/* Status badge */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{ width: 10, height: 10, borderRadius: '50%', background: waStatus?.conectado ? C.green : C.red, boxShadow: waStatus?.conectado ? `0 0 8px ${C.green}` : 'none' }} />
+            <span style={{ fontSize: 14, fontWeight: 600, color: waStatus?.conectado ? C.green : C.muted }}>
+              {waStatus === null ? 'Verificando...' : waStatus.conectado ? 'WhatsApp conectado ✅' : 'WhatsApp não conectado'}
+            </span>
+            {waStatus?.instance && <code style={{ fontSize: 11, color: C.muted, background: C.surface2, padding: '2px 8px', borderRadius: 6 }}>{waStatus.instance}</code>}
           </div>
-
-          {/* Mensagens de feedback */}
-          {waMsg && (
-            <div style={{ padding: '10px 14px', borderRadius: 10, marginBottom: 12, fontSize: 13,
-              background: waMsg.tipo === 'ok' ? 'rgba(16,185,129,0.08)' : 'rgba(239,68,68,0.08)',
-              border: `1px solid ${waMsg.tipo === 'ok' ? 'rgba(16,185,129,0.25)' : 'rgba(239,68,68,0.25)'}`,
-              color: waMsg.tipo === 'ok' ? C.green : C.red }}>
-              {waMsg.texto}
-            </div>
-          )}
-          {waTestMsg && (
-            <div style={{ padding: '10px 14px', borderRadius: 10, marginBottom: 12, fontSize: 13,
-              background: waTestMsg.tipo === 'ok' ? 'rgba(16,185,129,0.08)' : waTestMsg.tipo === 'aviso' ? 'rgba(245,158,11,0.08)' : 'rgba(239,68,68,0.08)',
-              border: `1px solid ${waTestMsg.tipo === 'ok' ? 'rgba(16,185,129,0.25)' : waTestMsg.tipo === 'aviso' ? 'rgba(245,158,11,0.25)' : 'rgba(239,68,68,0.25)'}`,
-              color: waTestMsg.tipo === 'ok' ? C.green : waTestMsg.tipo === 'aviso' ? C.yellow : C.red }}>
-              {waTestMsg.texto}
-            </div>
-          )}
-
-          <div style={{ display: 'flex', gap: 12 }}>
-            <button type="button" onClick={testarWhatsapp} disabled={waTesting}
-              style={{ padding: '10px 20px', background: 'rgba(255,255,255,0.04)', border: `1px solid ${C.border}`, borderRadius: 10, color: C.muted, fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>
-              {waTesting ? 'Testando...' : '🔌 Testar conexão'}
+          {waStatus?.conectado && (
+            <button onClick={desconectar}
+              style={{ padding: '6px 14px', background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.25)', borderRadius: 8, color: C.red, fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>
+              Desconectar
             </button>
-            <button type="submit" disabled={waLoading}
-              style={{ padding: '10px 24px', background: 'linear-gradient(135deg,#00E5FF,#00B8CC)', border: 'none', borderRadius: 10, color: '#080C14', fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', opacity: waLoading ? 0.6 : 1 }}>
-              {waLoading ? 'Salvando...' : '💾 Salvar configuração'}
+          )}
+        </div>
+
+        {/* Erro */}
+        {waErro && (
+          <div style={{ padding: '10px 14px', borderRadius: 10, marginBottom: 16, fontSize: 13, background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.25)', color: C.red }}>
+            {waErro}
+          </div>
+        )}
+
+        {/* QR Code */}
+        {qrCode ? (
+          <div style={{ textAlign: 'center' }}>
+            <p style={{ fontSize: 13, color: C.muted, marginBottom: 16 }}>
+              Abra o WhatsApp no celular → <strong style={{ color: C.text }}>Configurações → Aparelhos conectados → Conectar aparelho</strong> → escaneie o QR code abaixo
+            </p>
+            <div style={{ display: 'inline-block', padding: 16, background: '#fff', borderRadius: 16 }}>
+              <img src={qrCode.startsWith('data:') ? qrCode : `data:image/png;base64,${qrCode}`} alt="QR Code WhatsApp" style={{ width: 240, height: 240, display: 'block' }} />
+            </div>
+            <p style={{ fontSize: 12, color: C.muted, marginTop: 12 }}>Verificando conexão automaticamente...</p>
+          </div>
+        ) : !waStatus?.conectado && (
+          <div style={{ textAlign: 'center', padding: '20px 0' }}>
+            <p style={{ fontSize: 13, color: C.muted, marginBottom: 20, lineHeight: 1.7 }}>
+              Sua instância do WhatsApp está pronta no servidor.<br />
+              Clique no botão abaixo para gerar o QR code e conectar seu número.
+            </p>
+            <button onClick={gerarQRCode} disabled={waLoading}
+              style={{ padding: '12px 28px', background: 'linear-gradient(135deg,#25D366,#128C7E)', border: 'none', borderRadius: 12, color: '#fff', fontSize: 14, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', opacity: waLoading ? 0.6 : 1 }}>
+              {waLoading ? 'Gerando QR code...' : '📱 Conectar WhatsApp'}
             </button>
           </div>
-        </form>
+        )}
       </div>
 
       {/* Endpoints úteis */}

@@ -1,16 +1,17 @@
 // ══════════════════════════════════════════════════════════════
 // FlowOS – routes/configuracoes.js
-// Configurações por workspace (WhatsApp, integrações, etc.)
+// Configurações por workspace + WhatsApp (QR code, status)
+// URL e chave da Evolution ficam no .env (seu VPS)
+// Cada workspace tem sua própria instância criada automaticamente
 // ══════════════════════════════════════════════════════════════
-import express  from 'express'
+import express from 'express'
 import supabase from '../services/supabase.js'
 import { autenticar } from './auth.js'
+import { criarInstancia, getQRCode, getStatus, desconectarInstancia } from '../services/evolution.js'
 
 const router = express.Router()
 
-// ──────────────────────────────────────────────────────────────
-// Helper: busca config do workspace no banco
-// ──────────────────────────────────────────────────────────────
+// ── Helper: lê config do workspace ───────────────────────────
 export async function getWorkspaceConfig(workspace_id) {
   const { data } = await supabase
     .from('workspace_configuracoes')
@@ -20,89 +21,109 @@ export async function getWorkspaceConfig(workspace_id) {
   return data || {}
 }
 
+// ── Helper: nome da instância (slug do workspace) ─────────────
+async function getInstanceName(workspace_id) {
+  const cfg = await getWorkspaceConfig(workspace_id)
+  if (cfg.evolution_instance) return cfg.evolution_instance
+
+  // Fallback: busca slug do workspace
+  const { data: ws } = await supabase
+    .from('workspaces')
+    .select('slug')
+    .eq('id', workspace_id)
+    .single()
+  return ws?.slug || null
+}
+
+// ──────────────────────────────────────────────────────────────
+// GET /configuracoes/whatsapp/status
+// Retorna se o WhatsApp está conectado
+// ──────────────────────────────────────────────────────────────
+router.get('/whatsapp/status', autenticar, async (req, res) => {
+  try {
+    const instance = await getInstanceName(req.usuario.workspace_id)
+    if (!instance) return res.json({ conectado: false, state: 'sem_instancia' })
+
+    if (!process.env.EVOLUTION_API_URL) return res.json({ conectado: false, state: 'api_nao_configurada' })
+
+    const status = await getStatus(instance)
+    res.json({ ...status, instance })
+  } catch (err) {
+    res.json({ conectado: false, state: 'erro', message: err.message })
+  }
+})
+
+// ──────────────────────────────────────────────────────────────
+// GET /configuracoes/whatsapp/qrcode
+// Retorna o QR code base64 para o cliente escanear
+// ──────────────────────────────────────────────────────────────
+router.get('/whatsapp/qrcode', autenticar, async (req, res) => {
+  try {
+    if (!process.env.EVOLUTION_API_URL || !process.env.EVOLUTION_API_KEY)
+      return res.status(503).json({ error: 'Servidor WhatsApp não configurado. Contate o suporte.' })
+
+    let instance = await getInstanceName(req.usuario.workspace_id)
+
+    // Se não tem instância ainda, cria agora
+    if (!instance) {
+      const { data: ws } = await supabase.from('workspaces').select('slug').eq('id', req.usuario.workspace_id).single()
+      instance = ws.slug
+      await criarInstancia(instance)
+      await supabase.from('workspace_configuracoes').upsert(
+        { workspace_id: req.usuario.workspace_id, evolution_instance: instance, atualizado_em: new Date().toISOString() },
+        { onConflict: 'workspace_id' }
+      )
+    }
+
+    // Verifica se já está conectado
+    const status = await getStatus(instance)
+    if (status.conectado) return res.json({ conectado: true, message: 'WhatsApp já está conectado!' })
+
+    // Gera QR code
+    const qr = await getQRCode(instance)
+    const base64 = qr?.base64 || qr?.qrcode?.base64 || qr?.code || null
+
+    if (!base64) return res.status(400).json({ error: 'QR code não disponível. Aguarde alguns segundos e tente novamente.' })
+
+    res.json({ conectado: false, qrcode: base64, instance })
+  } catch (err) {
+    console.error('[QRCODE]', err.message)
+    res.status(500).json({ error: 'Erro ao gerar QR code: ' + err.message })
+  }
+})
+
+// ──────────────────────────────────────────────────────────────
+// POST /configuracoes/whatsapp/desconectar
+// ──────────────────────────────────────────────────────────────
+router.post('/whatsapp/desconectar', autenticar, async (req, res) => {
+  try {
+    const instance = await getInstanceName(req.usuario.workspace_id)
+    if (!instance) return res.status(400).json({ error: 'Nenhuma instância encontrada.' })
+
+    await desconectarInstancia(instance)
+    res.json({ success: true, message: 'WhatsApp desconectado.' })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
 // ──────────────────────────────────────────────────────────────
 // GET /configuracoes/whatsapp
+// Info geral (para o frontend saber o estado inicial)
 // ──────────────────────────────────────────────────────────────
 router.get('/whatsapp', autenticar, async (req, res) => {
   try {
-    const config = await getWorkspaceConfig(req.usuario.workspace_id)
-    res.json({
-      evolution_api_url:  config.evolution_api_url  || '',
-      evolution_api_key:  config.evolution_api_key  || '',
-      evolution_instance: config.evolution_instance || '',
-      rh_whatsapp_numero: config.rh_whatsapp_numero || '',
-      configurado: !!(config.evolution_api_url && config.evolution_api_key && config.evolution_instance)
-    })
+    const instance = await getInstanceName(req.usuario.workspace_id)
+    const apiConfigurada = !!(process.env.EVOLUTION_API_URL && process.env.EVOLUTION_API_KEY)
+
+    if (!apiConfigurada) return res.json({ configurado: false, conectado: false, instance: null })
+
+    if (!instance) return res.json({ configurado: true, conectado: false, instance: null })
+
+    const status = await getStatus(instance).catch(() => ({ conectado: false, state: 'erro' }))
+    res.json({ configurado: true, conectado: status.conectado, state: status.state, instance })
   } catch (err) {
     res.status(500).json({ error: err.message })
-  }
-})
-
-// ──────────────────────────────────────────────────────────────
-// POST /configuracoes/whatsapp  — salva ou atualiza
-// ──────────────────────────────────────────────────────────────
-router.post('/whatsapp', autenticar, async (req, res) => {
-  try {
-    const { workspace_id } = req.usuario
-    const { evolution_api_url, evolution_api_key, evolution_instance, rh_whatsapp_numero } = req.body
-
-    if (!evolution_api_url || !evolution_api_key || !evolution_instance)
-      return res.status(400).json({ error: 'URL, chave de API e instância são obrigatórios.' })
-
-    const { data, error } = await supabase
-      .from('workspace_configuracoes')
-      .upsert(
-        { workspace_id, evolution_api_url, evolution_api_key, evolution_instance, rh_whatsapp_numero: rh_whatsapp_numero || null, atualizado_em: new Date().toISOString() },
-        { onConflict: 'workspace_id' }
-      )
-      .select()
-      .single()
-
-    if (error) throw error
-    res.json({ success: true, message: 'Configuração salva com sucesso!', data })
-  } catch (err) {
-    res.status(500).json({ error: err.message })
-  }
-})
-
-// ──────────────────────────────────────────────────────────────
-// POST /configuracoes/whatsapp/testar  — testa a conexão
-// ──────────────────────────────────────────────────────────────
-router.post('/whatsapp/testar', autenticar, async (req, res) => {
-  try {
-    const { evolution_api_url, evolution_api_key, evolution_instance } = req.body
-
-    if (!evolution_api_url || !evolution_api_key || !evolution_instance)
-      return res.status(400).json({ error: 'Preencha todos os campos antes de testar.' })
-
-    const url = `${evolution_api_url.replace(/\/$/, '')}/instance/fetchInstances`
-    const response = await fetch(url, {
-      headers: { apikey: evolution_api_key, 'Content-Type': 'application/json' },
-      signal: AbortSignal.timeout(8000)
-    })
-
-    if (!response.ok) {
-      return res.status(400).json({ error: `Evolution API retornou ${response.status}. Verifique a URL e a chave.` })
-    }
-
-    const instances = await response.json()
-    const instancia = Array.isArray(instances)
-      ? instances.find(i => i.instance?.instanceName === evolution_instance || i.name === evolution_instance)
-      : null
-
-    if (!instancia)
-      return res.status(404).json({ error: `Instância "${evolution_instance}" não encontrada. Verifique o nome.` })
-
-    const conectado = instancia.instance?.state === 'open' || instancia.state === 'open'
-    res.json({
-      success: true,
-      conectado,
-      message: conectado ? '✅ WhatsApp conectado e pronto para enviar!' : '⚠️ Instância encontrada mas WhatsApp não está conectado. Escaneie o QR Code no painel da Evolution API.'
-    })
-  } catch (err) {
-    if (err.name === 'TimeoutError')
-      return res.status(400).json({ error: 'Tempo esgotado. Verifique se a URL da Evolution API está acessível.' })
-    res.status(500).json({ error: 'Erro ao testar conexão: ' + err.message })
   }
 })
 

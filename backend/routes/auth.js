@@ -6,6 +6,7 @@ import express  from 'express'
 import jwt      from 'jsonwebtoken'
 import bcrypt   from 'bcryptjs'
 import supabase from '../services/supabase.js'
+import { criarInstancia } from '../services/evolution.js'
 
 const router     = express.Router()
 const JWT_SECRET = process.env.JWT_SECRET || 'flowos_dev_secret'
@@ -132,7 +133,20 @@ router.post('/cadastro', async (req, res) => {
 
     if (userError) throw userError
 
-    // 4. JWT
+    // 4. Criar instância na Evolution API (não bloqueia o cadastro se falhar)
+    try {
+      if (process.env.EVOLUTION_API_URL && process.env.EVOLUTION_API_KEY) {
+        await criarInstancia(slug)
+        await supabase.from('workspace_configuracoes').upsert(
+          { workspace_id: workspace.id, evolution_instance: slug, atualizado_em: new Date().toISOString() },
+          { onConflict: 'workspace_id' }
+        )
+      }
+    } catch (evErr) {
+      console.warn('[CADASTRO] Evolution API indisponível, instância não criada:', evErr.message)
+    }
+
+    // 5. JWT
     const token = jwt.sign(
       { id: usuario.id, workspace_id: workspace.id, perfil: 'admin' },
       JWT_SECRET,

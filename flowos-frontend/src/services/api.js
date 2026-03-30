@@ -195,9 +195,10 @@ export const exportApi = {
 // CONFIGURAÇÕES
 // ══════════════════════════════════════════════════════════════
 export const configuracoesApi = {
-  whatsapp:        ()       => req('GET',  '/configuracoes/whatsapp'),
-  salvarWhatsapp:  (dados)  => req('POST', '/configuracoes/whatsapp', dados),
-  testarWhatsapp:  (dados)  => req('POST', '/configuracoes/whatsapp/testar', dados),
+  whatsapp:           ()  => req('GET',  '/configuracoes/whatsapp'),
+  whatsappStatus:     ()  => req('GET',  '/configuracoes/whatsapp/status'),
+  whatsappQRCode:     ()  => req('GET',  '/configuracoes/whatsapp/qrcode'),
+  whatsappDesconectar:()  => req('POST', '/configuracoes/whatsapp/desconectar'),
 }
 
 // ══════════════════════════════════════════════════════════════
