@@ -1,10 +1,29 @@
 import express from 'express'
 import { Parser } from 'json2csv'
 import * as XLSX from 'xlsx'
+import multer from 'multer'
+import fs from 'fs'
+import path from 'path'
+import { fileURLToPath } from 'url'
 import supabase from '../services/supabase.js'
 import { autenticar } from './auth.js'
 
-const router = express.Router()
+const router   = express.Router()
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+const TEMPLATES_DIR = path.join(__dirname, '../templates')
+const PBIT_PATH     = path.join(TEMPLATES_DIR, 'flowos-template.pbit')
+
+const uploadPbit = multer({
+  storage: multer.diskStorage({
+    destination: TEMPLATES_DIR,
+    filename: (_req, _file, cb) => cb(null, 'flowos-template.pbit')
+  }),
+  limits: { fileSize: 50 * 1024 * 1024 }, // 50 MB
+  fileFilter: (_req, file, cb) => {
+    if (file.originalname.endsWith('.pbit') || file.mimetype === 'application/octet-stream') cb(null, true)
+    else cb(new Error('Apenas arquivos .pbit são aceitos'))
+  }
+})
 
 // ─── Helper: aplica estilo de cabeçalho em uma sheet ────────
 function estilizarCabecalho(ws, nCols) {
