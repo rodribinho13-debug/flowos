@@ -6,7 +6,153 @@ import { autenticar } from './auth.js'
 
 const router = express.Router()
 
-// ─── Exportar para CSV ──────────────────────────────────────
+// ─── Helper: aplica estilo de cabeçalho em uma sheet ────────
+function estilizarCabecalho(ws, nCols) {
+  const range = XLSX.utils.decode_range(ws['!ref'] || 'A1')
+  for (let C = range.s.c; C <= Math.min(range.e.c, nCols - 1); C++) {
+    const cell = ws[XLSX.utils.encode_cell({ r: 0, c: C })]
+    if (cell) {
+      cell.s = {
+        font:    { bold: true, color: { rgb: 'FFFFFF' } },
+        fill:    { fgColor: { rgb: '0E1420' } },
+        alignment: { horizontal: 'center' }
+      }
+    }
+  }
+}
+
+// ─── Gerar workbook Power BI ─────────────────────────────────
+// GET /export/powerbi-workbook
+// Gera Excel multi-abas com TODOS os dados do workspace
+// pronto para abrir no Power BI Desktop
+// ─────────────────────────────────────────────────────────────
+router.get('/powerbi-workbook', autenticar, async (req, res) => {
+  try {
+    const { workspace_id } = req.usuario
+
+    // Busca nome da empresa
+    const { data: ws } = await supabase
+      .from('workspaces')
+      .select('nome, setor, plano')
+      .eq('id', workspace_id)
+      .single()
+
+    const nomeEmpresa = ws?.nome || 'Empresa'
+    const dataExport  = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })
+
+    // Busca todos os dados em paralelo
+    const [leads, lancamentos, kpis, kpiRegistros, funcionarios, oportunidades] = await Promise.all([
+      supabase.from('leads').select('*').eq('workspace_id', workspace_id).order('criado_em', { ascending: false }),
+      supabase.from('fin_lancamentos').select('*, fin_categorias(nome,tipo), fin_contas(nome)').eq('workspace_id', workspace_id).order('data_competencia', { ascending: false }),
+      supabase.from('kpis').select('*').eq('workspace_id', workspace_id),
+      supabase.from('kpi_registros').select('*, kpis(nome,modulo,unidade)').eq('workspace_id', workspace_id).order('data_referencia', { ascending: false }),
+      supabase.from('rh_funcionarios').select('*').eq('workspace_id', workspace_id).order('nome'),
+      supabase.from('oportunidades').select('*, leads(nome,empresa), etapas(nome), pipelines(nome)').eq('workspace_id', workspace_id).order('criado_em', { ascending: false }).catch(() => ({ data: [] }))
+    ])
+
+    // Flatten lançamentos (join)
+    const lancFlat = (lancamentos.data || []).map(l => ({
+      id: l.id, tipo: l.tipo, descricao: l.descricao, valor: l.valor,
+      status: l.status, data_competencia: l.data_competencia,
+      categoria: l.fin_categorias?.nome || '', conta: l.fin_contas?.nome || '',
+      criado_em: l.criado_em
+    }))
+
+    // Flatten KPI registros
+    const kpiFlat = (kpiRegistros.data || []).map(r => ({
+      id: r.id, kpi_nome: r.kpis?.nome || '', modulo: r.kpis?.modulo || '',
+      unidade: r.kpis?.unidade || '', valor: r.valor, data_referencia: r.data_referencia
+    }))
+
+    // Flatten oportunidades
+    const opFlat = (oportunidades.data || []).map(o => ({
+      id: o.id, lead: o.leads?.nome || '', empresa: o.leads?.empresa || '',
+      pipeline: o.pipelines?.nome || '', etapa: o.etapas?.nome || '',
+      status: o.status, valor: o.valor, criado_em: o.criado_em
+    }))
+
+    // Monta o workbook
+    const wb = XLSX.utils.book_new()
+
+    // ── Aba 1: Capa / Instruções ─────────────────────────────
+    const capaData = [
+      ['RELATÓRIO POWER BI – ' + nomeEmpresa.toUpperCase()],
+      [''],
+      ['Empresa',       nomeEmpresa],
+      ['Setor',         ws?.setor || '—'],
+      ['Data de export', dataExport],
+      [''],
+      ['ABAS DISPONÍVEIS'],
+      ['Leads',         'Todos os leads/contatos do CRM'],
+      ['Financeiro',    'Lançamentos de receitas e despesas'],
+      ['KPI_Registros', 'Histórico de valores dos KPIs'],
+      ['KPIs',          'Cadastro dos indicadores'],
+      ['Funcionarios',  'Quadro de funcionários (RH)'],
+      ['Oportunidades', 'Pipeline de vendas / CRM'],
+      [''],
+      ['COMO USAR NO POWER BI'],
+      ['1. Abra o Power BI Desktop'],
+      ['2. Clique em "Obter Dados" → "Excel"'],
+      ['3. Selecione este arquivo'],
+      ['4. Marque todas as abas e clique em "Carregar"'],
+      ['5. Crie suas visualizações!'],
+    ]
+    const wsCapa = XLSX.utils.aoa_to_sheet(capaData)
+    wsCapa['!cols'] = [{ wch: 22 }, { wch: 50 }]
+    wsCapa['A1'].s = { font: { bold: true, sz: 14, color: { rgb: '00E5FF' } } }
+    XLSX.utils.book_append_sheet(wb, wsCapa, 'Início')
+
+    // ── Aba 2: Leads ─────────────────────────────────────────
+    const wsLeads = XLSX.utils.json_to_sheet(leads.data || [])
+    wsLeads['!cols'] = [{ wch: 30 }, { wch: 30 }, { wch: 25 }, { wch: 15 }, { wch: 20 }]
+    estilizarCabecalho(wsLeads, 10)
+    XLSX.utils.book_append_sheet(wb, wsLeads, 'Leads')
+
+    // ── Aba 3: Financeiro ────────────────────────────────────
+    const wsFinanc = XLSX.utils.json_to_sheet(lancFlat)
+    wsFinanc['!cols'] = [{ wch: 12 }, { wch: 12 }, { wch: 35 }, { wch: 14 }, { wch: 14 }, { wch: 18 }, { wch: 20 }, { wch: 20 }]
+    estilizarCabecalho(wsFinanc, 9)
+    XLSX.utils.book_append_sheet(wb, wsFinanc, 'Financeiro')
+
+    // ── Aba 4: KPI_Registros ─────────────────────────────────
+    const wsKpiReg = XLSX.utils.json_to_sheet(kpiFlat)
+    wsKpiReg['!cols'] = [{ wch: 12 }, { wch: 30 }, { wch: 18 }, { wch: 14 }, { wch: 14 }, { wch: 18 }]
+    estilizarCabecalho(wsKpiReg, 6)
+    XLSX.utils.book_append_sheet(wb, wsKpiReg, 'KPI_Registros')
+
+    // ── Aba 5: KPIs (cadastro) ───────────────────────────────
+    const wsKpis = XLSX.utils.json_to_sheet(kpis.data || [])
+    wsKpis['!cols'] = [{ wch: 12 }, { wch: 30 }, { wch: 18 }, { wch: 14 }, { wch: 14 }]
+    estilizarCabecalho(wsKpis, 6)
+    XLSX.utils.book_append_sheet(wb, wsKpis, 'KPIs')
+
+    // ── Aba 6: Funcionários ──────────────────────────────────
+    const wsFuncs = XLSX.utils.json_to_sheet(funcionarios.data || [])
+    wsFuncs['!cols'] = [{ wch: 12 }, { wch: 30 }, { wch: 18 }, { wch: 20 }, { wch: 18 }, { wch: 15 }]
+    estilizarCabecalho(wsFuncs, 10)
+    XLSX.utils.book_append_sheet(wb, wsFuncs, 'Funcionarios')
+
+    // ── Aba 7: Oportunidades ─────────────────────────────────
+    if (opFlat.length > 0) {
+      const wsOp = XLSX.utils.json_to_sheet(opFlat)
+      wsOp['!cols'] = [{ wch: 12 }, { wch: 30 }, { wch: 30 }, { wch: 20 }, { wch: 20 }, { wch: 14 }, { wch: 14 }]
+      estilizarCabecalho(wsOp, 8)
+      XLSX.utils.book_append_sheet(wb, wsOp, 'Oportunidades')
+    }
+
+    // Gera o buffer
+    const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx', cellStyles: true })
+    const nomeArquivo = `${nomeEmpresa.replace(/[^a-zA-Z0-9]/g, '_')}_PowerBI_${new Date().toISOString().split('T')[0]}.xlsx`
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    res.setHeader('Content-Disposition', `attachment; filename="${nomeArquivo}"`)
+    res.send(buffer)
+  } catch (err) {
+    console.error('[POWERBI-WORKBOOK]', err.message)
+    res.status(500).json({ error: err.message })
+  }
+})
+
 router.get('/csv/:tipo', autenticar, async (req, res) => {
   try {
     const { workspace_id } = req.usuario

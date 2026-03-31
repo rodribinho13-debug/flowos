@@ -19,8 +19,9 @@ const TIPOS = [
 ]
 
 export default function Relatorios() {
-  const [baixando, setBaixando] = useState(null)
-  const [resumo,   setResumo]   = useState(null)
+  const [baixando,    setBaixando]    = useState(null)
+  const [gerandoBI,   setGerandoBI]   = useState(false)
+  const [resumo,      setResumo]      = useState(null)
 
   useEffect(() => {
     dashboardApi.get().then(d => setResumo(d)).catch(() => {})
@@ -34,6 +35,17 @@ export default function Relatorios() {
       alert('Erro ao exportar: ' + err.message)
     } finally {
       setBaixando(null)
+    }
+  }
+
+  const gerarWorkbookBI = async () => {
+    setGerandoBI(true)
+    try {
+      await exportApi.baixarWorkbookBI()
+    } catch (err) {
+      alert('Erro ao gerar arquivo Power BI: ' + err.message)
+    } finally {
+      setGerandoBI(false)
     }
   }
 
@@ -90,7 +102,25 @@ export default function Relatorios() {
         ))}
       </div>
 
-      {/* Power BI */}
+      {/* Botão Power BI Workbook */}
+      <div style={{ background: 'linear-gradient(135deg,rgba(0,229,255,0.06),rgba(124,58,237,0.06))', border: '1px solid rgba(0,229,255,0.2)', borderRadius: 16, padding: 28, marginBottom: 24, display: 'flex', alignItems: 'center', gap: 24 }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontFamily: 'Syne,sans-serif', fontWeight: 800, fontSize: 18, color: C.text, marginBottom: 6 }}>
+            📊 Gerar arquivo Power BI
+          </div>
+          <p style={{ fontSize: 13, color: C.muted, margin: 0, lineHeight: 1.7 }}>
+            Gera um <strong style={{ color: C.text }}>.xlsx</strong> com <strong style={{ color: C.text }}>todas as abas</strong> (Leads, Financeiro, KPIs, RH, Oportunidades) já formatadas e prontas para abrir no Power BI Desktop. Basta clicar em <em>Obter Dados → Excel</em>.
+          </p>
+        </div>
+        <button
+          onClick={gerarWorkbookBI}
+          disabled={gerandoBI}
+          style={{ flexShrink: 0, padding: '14px 28px', background: gerandoBI ? 'rgba(0,229,255,0.2)' : 'linear-gradient(135deg,#00E5FF,#7C3AED)', border: 'none', borderRadius: 12, color: '#fff', fontWeight: 800, fontSize: 14, cursor: gerandoBI ? 'not-allowed' : 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap' }}>
+          {gerandoBI ? '⏳ Gerando...' : '⬇️ Baixar workbook'}
+        </button>
+      </div>
+
+      {/* Power BI URLs diretas */}
       <div style={{ background: 'rgba(0,229,255,0.04)', border: '1px solid rgba(0,229,255,0.15)', borderRadius: 16, padding: 28, marginBottom: 24 }}>
         <div style={{ fontFamily: 'Syne,sans-serif', fontWeight: 800, fontSize: 17, color: C.accent, marginBottom: 8 }}>📊 Conectar ao Power BI</div>
         <p style={{ fontSize: 13, color: C.muted, marginBottom: 20, lineHeight: 1.6 }}>
@@ -117,10 +147,10 @@ export default function Relatorios() {
         <div style={{ fontWeight: 700, marginBottom: 16, fontSize: 14 }}>📖 Como usar</div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           {[
-            ['1', 'Clique em Excel ou CSV para baixar os dados imediatamente'],
-            ['2', 'Para Power BI: cole a URL no campo "Fonte Web" e adicione o header de autenticação'],
-            ['3', 'O token está no localStorage do navegador (flowos_token) — copie via F12 > Application'],
-            ['4', 'Configure atualização automática a cada 30 min no Power BI para dados sempre frescos'],
+            ['1', 'Clique em "Baixar workbook" para gerar o Excel com todos os dados do seu workspace'],
+            ['2', 'Abra o Power BI Desktop → Obter Dados → Excel → selecione o arquivo baixado'],
+            ['3', 'Marque todas as abas e clique em Carregar — seus dados já estarão estruturados'],
+            ['4', 'Para dados sempre atualizados: use as URLs da API acima com atualização automática a cada 30 min'],
           ].map(([n, txt]) => (
             <div key={n} style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
               <div style={{ width: 24, height: 24, borderRadius: 8, background: 'rgba(0,229,255,0.1)', border: '1px solid rgba(0,229,255,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 700, color: C.accent, flexShrink: 0 }}>{n}</div>

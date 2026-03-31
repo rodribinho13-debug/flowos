@@ -188,6 +188,24 @@ export const exportApi = {
     a.href = URL.createObjectURL(blob)
     a.download = `flowos_${tipo}.${formato}`
     a.click()
+  },
+
+  baixarWorkbookBI: async () => {
+    const res = await fetch(`${API_URL}/export/powerbi-workbook`, {
+      headers: { Authorization: `Bearer ${getToken()}` }
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      throw new Error(err.error || 'Erro ao gerar arquivo')
+    }
+    const blob = await res.blob()
+    const header = res.headers.get('Content-Disposition') || ''
+    const nomeMatch = header.match(/filename="(.+)"/)
+    const nome = nomeMatch ? nomeMatch[1] : 'FlowOS_PowerBI.xlsx'
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = nome
+    a.click()
   }
 }
 
