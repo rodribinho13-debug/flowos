@@ -9,9 +9,8 @@ import { authApi } from './services/api'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import KPIs from './pages/KPIs'
-import Leads from './pages/Leads'
 import Mensagens from './pages/Mensagens'
-import CRM from './pages/CRM'
+import Prospeccao from './pages/Prospeccao'
 import Relatorios from './pages/Relatorios'
 import Config from './pages/Config'
 import Financeiro from './pages/Financeiro'
@@ -38,9 +37,8 @@ export default function App() {
           <Route index element={<Navigate to="/dashboard" replace />} />
           <Route path="dashboard"   element={<Dashboard />} />
           <Route path="kpis"        element={<KPIs />} />
-          <Route path="leads"       element={<Leads />} />
+          <Route path="prospeccao"  element={<Prospeccao />} />
           <Route path="mensagens"   element={<Mensagens />} />
-          <Route path="crm"         element={<CRM />} />
           <Route path="financeiro"  element={<Financeiro />} />
           <Route path="rh"          element={<RH />} />
           <Route path="relatorios"  element={<Relatorios />} />

@@ -1,7 +1,7 @@
 import express from 'express'
 import supabase from '../services/supabase.js'
 import { autenticar } from './auth.js'
-import { gerarMensagemIA } from '../services/openai.js'
+import { gerarMensagemIA, gerarLembrete } from '../services/openai.js'
 import { getWorkspaceConfig } from './configuracoes.js'
 import nodemailer from 'nodemailer'
 import dotenv from 'dotenv'
@@ -146,12 +146,55 @@ router.post('/email', autenticar, async (req, res) => {
   }
 })
 
-// ─── Gerar Mensagem com IA ───────────────────────────────────
+// ─── Gerar Mensagem com IA (genérico) ────────────────────────
 router.post('/gerar', autenticar, async (req, res) => {
   try {
     const { prompt } = req.body
-    const mensagemGerada = await gerarMensagemIA(prompt) // Usando a função correta
+    const mensagemGerada = await gerarMensagemIA(prompt)
     res.json({ mensagem: mensagemGerada })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// ─── Gerar lembrete / comunicado para gestores ────────────────
+// POST /mensagens/lembrete
+// Body: { tipo, dados, tom, enviar_whatsapp, numero }
+// tipo: 'reuniao' | 'cobranca' | 'prazo' | 'aniversario' | 'meta' | 'custom'
+// tom:  'profissional' | 'informal' | 'urgente' | 'cordial'
+router.post('/lembrete', autenticar, async (req, res) => {
+  try {
+    const { workspace_id } = req.usuario
+    const { tipo = 'custom', dados = {}, tom = 'profissional', enviar_whatsapp = false, numero } = req.body
+
+    const TIPOS_VALIDOS = ['reuniao','cobranca','prazo','aniversario','meta','custom']
+    if (!TIPOS_VALIDOS.includes(tipo))
+      return res.status(400).json({ error: `Tipo inválido. Use: ${TIPOS_VALIDOS.join(', ')}` })
+
+    const mensagem = await gerarLembrete({ tipo, dados, tom })
+
+    // Envia via WhatsApp se solicitado
+    if (enviar_whatsapp && numero) {
+      const wsCfg  = await import('./configuracoes.js').then(m => m.getWorkspaceConfig(workspace_id))
+      const apiUrl = wsCfg.evolution_api_url  || process.env.EVOLUTION_API_URL
+      const apiKey = wsCfg.evolution_api_key   || process.env.EVOLUTION_API_KEY
+      const inst   = wsCfg.evolution_instance  || process.env.EVOLUTION_INSTANCE
+
+      if (apiUrl && apiKey && inst) {
+        const numFmt = String(numero).replace(/\D/g, '')
+        const num    = numFmt.startsWith('55') ? numFmt : `55${numFmt}`
+        await fetch(`${apiUrl.replace(/\/$/, '')}/message/sendText/${inst}`, {
+          method: 'POST',
+          headers: { apikey: apiKey, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ number: `${num}@s.whatsapp.net`, textMessage: { text: mensagem } })
+        })
+        await supabase.from('mensagens_enviadas').insert({
+          workspace_id, canal: 'whatsapp', corpo: mensagem, status: 'enviado'
+        })
+      }
+    }
+
+    res.json({ mensagem, tipo, tom })
   } catch (err) {
     res.status(500).json({ error: err.message })
   }

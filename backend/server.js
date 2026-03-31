@@ -16,6 +16,7 @@ import exportRoutes     from './routes/export.js'
 import financeiroRoutes from './routes/financeiro.js'
 import { rhRouter }     from './routes/financeiro.js'
 import operacoesRoutes  from './routes/operacoes.js'
+import prospeccaoRoutes from './routes/prospeccao.js'
 
 dotenv.config()
 
@@ -54,6 +55,7 @@ app.use('/export',     exportRoutes)
 app.use('/financeiro', financeiroRoutes)
 app.use('/rh',         rhRouter)
 app.use('/operacoes',  operacoesRoutes)
+app.use('/prospeccao', prospeccaoRoutes)
 
 // ─── Webhook N8N ─────────────────────────────────────────
 app.post('/webhook/n8n/:modulo', (req, res) =>

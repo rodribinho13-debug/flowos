@@ -6,15 +6,14 @@ import { Outlet, NavLink, useNavigate } from 'react-router-dom'
 import { authApi, getUsuario, healthCheck } from '../services/api'
 
 const LINKS = [
-  { to: '/dashboard',  label: 'Dashboard',   icon: '⬛' },
-  { to: '/kpis',       label: 'KPIs',        icon: '📊' },
-  { to: '/financeiro', label: 'Financeiro',  icon: '💰' },
-  { to: '/leads',      label: 'Leads',       icon: '🎯' },
-  { to: '/crm',        label: 'CRM',         icon: '🤝' },
-  { to: '/mensagens',  label: 'Mensagens',   icon: '💬' },
-  { to: '/rh',         label: 'RH',          icon: '👥' },
-  { to: '/relatorios', label: 'Relatórios',  icon: '📋' },
-  { to: '/config',     label: 'Config',      icon: '⚙️'  },
+  { to: '/dashboard',  label: 'Dashboard',    icon: '⬛' },
+  { to: '/kpis',       label: 'KPIs',         icon: '📊' },
+  { to: '/financeiro', label: 'Financeiro',   icon: '💰' },
+  { to: '/prospeccao', label: 'Prospecção',   icon: '🔍' },
+  { to: '/mensagens',  label: 'Mensagens',    icon: '💬' },
+  { to: '/rh',         label: 'RH',           icon: '👥' },
+  { to: '/relatorios', label: 'Relatórios',   icon: '📋' },
+  { to: '/config',     label: 'Config',       icon: '⚙️'  },
 ]
 
 export default function Layout() {

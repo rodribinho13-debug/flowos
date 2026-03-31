@@ -110,6 +110,7 @@ export const mensagensApi = {
   },
   enviarWhatsApp: (dados)     => req('POST', '/mensagens/whatsapp', dados),
   gerar:          (dados)     => req('POST', '/mensagens/gerar', dados),
+  lembrete:       (dados)     => req('POST', '/mensagens/lembrete', dados),
   templates:      ()          => req('GET', '/mensagens/templates'),
   criarTemplate:  (dados)     => req('POST', '/mensagens/templates', dados),
 }
@@ -210,6 +211,17 @@ export const exportApi = {
 }
 
 // ══════════════════════════════════════════════════════════════
+// PROSPECÇÃO
+// ══════════════════════════════════════════════════════════════
+export const prospeccaoApi = {
+  consultarCNPJ: (cnpj)        => req('GET', `/prospeccao/cnpj/${cnpj}`),
+  listar:        (filtros = {}) => req('GET', `/prospeccao?${new URLSearchParams(filtros)}`),
+  salvar:        (dados)        => req('POST', '/prospeccao', dados),
+  atualizar:     (id, dados)    => req('PATCH', `/prospeccao/${id}`, dados),
+  remover:       (id)           => req('DELETE', `/prospeccao/${id}`),
+}
+
+// ══════════════════════════════════════════════════════════════
 // CONFIGURAÇÕES
 // ══════════════════════════════════════════════════════════════
 export const configuracoesApi = {
@@ -227,6 +239,7 @@ export const healthCheck = () =>
 
 export default {
   auth: authApi,
+  prospeccao: prospeccaoApi,
   configuracoes: configuracoesApi,
   dashboard: dashboardApi,
   kpis: kpisApi,
