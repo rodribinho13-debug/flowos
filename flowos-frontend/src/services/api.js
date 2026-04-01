@@ -209,6 +209,43 @@ export const exportApi = {
     a.click()
   },
 
+  templates: () => req('GET', '/export/powerbi-templates'),
+
+  baixarModelo: (template) => {
+    const a = document.createElement('a')
+    a.href = `${API_URL}/export/powerbi-modelo/${template}`
+    a.click()
+  },
+
+  powerbiFromUpload: async (arquivo, titulo = '') => {
+    const form = new FormData()
+    form.append('arquivo', arquivo)
+    if (titulo) form.append('titulo', titulo)
+    const res = await fetch(`${API_URL}/export/powerbi-from-upload`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${getToken()}` },
+      body: form
+    })
+    if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || 'Erro') }
+    const blob = await res.blob()
+    const header = res.headers.get('Content-Disposition') || ''
+    const nome = (header.match(/filename="(.+)"/) || [])[1] || 'powerbi.xlsx'
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = nome; a.click()
+  },
+
+  powerbiFromSheets: async (sheets_url, titulo = '') => {
+    const res = await fetch(`${API_URL}/export/powerbi-from-sheets`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
+      body: JSON.stringify({ sheets_url, titulo })
+    })
+    if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || 'Erro') }
+    const blob = await res.blob()
+    const header = res.headers.get('Content-Disposition') || ''
+    const nome = (header.match(/filename="(.+)"/) || [])[1] || 'powerbi.xlsx'
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = nome; a.click()
+  },
+
   gerarDashboardHTML: async (dados) => {
     const res = await fetch(`${API_URL}/export/dashboard-html`, {
       method: 'POST',

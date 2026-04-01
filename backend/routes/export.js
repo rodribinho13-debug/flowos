@@ -5,6 +5,8 @@ import multer from 'multer'
 import fs from 'fs'
 import path from 'path'
 import crypto from 'crypto'
+import https from 'https'
+import http from 'http'
 import { fileURLToPath } from 'url'
 import supabase from '../services/supabase.js'
 import { autenticar } from './auth.js'
@@ -14,15 +16,206 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const TEMPLATES_DIR = path.join(__dirname, '../templates')
 const PBIT_PATH     = path.join(TEMPLATES_DIR, 'flowos-template.pbit')
 
-const uploadPbit = multer({
-  storage: multer.diskStorage({
-    destination: TEMPLATES_DIR,
-    filename: (_req, _file, cb) => cb(null, 'flowos-template.pbit')
-  }),
-  limits: { fileSize: 50 * 1024 * 1024 }, // 50 MB
+// ─── Multer para upload de planilha do cliente ───────────────
+const uploadPlanilha = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 20 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
-    if (file.originalname.endsWith('.pbit') || file.mimetype === 'application/octet-stream') cb(null, true)
-    else cb(new Error('Apenas arquivos .pbit são aceitos'))
+    const ok = ['.xlsx', '.xls', '.csv'].some(e => file.originalname.toLowerCase().endsWith(e))
+    ok ? cb(null, true) : cb(new Error('Apenas .xlsx, .xls ou .csv são aceitos'))
+  }
+})
+
+// ─── Templates disponíveis ───────────────────────────────────
+const TEMPLATES_BI = {
+  financeiro: {
+    label: 'Financeiro',
+    descricao: 'DRE, fluxo de caixa, receitas e despesas',
+    abas: [
+      { nome: 'Lancamentos', colunas: ['data','descricao','categoria','tipo','valor','status','conta'],
+        exemplo: [
+          { data:'2024-01-05', descricao:'Venda produto X', categoria:'Receita Operacional', tipo:'receita', valor:5000, status:'recebido', conta:'Conta Principal' },
+          { data:'2024-01-10', descricao:'Aluguel escritório', categoria:'Despesa Fixa', tipo:'despesa', valor:2000, status:'pago', conta:'Conta Principal' }
+        ]
+      },
+      { nome: 'Categorias', colunas: ['nome','tipo','grupo'],
+        exemplo: [
+          { nome:'Receita Operacional', tipo:'receita', grupo:'Operacional' },
+          { nome:'Despesa Fixa', tipo:'despesa', grupo:'Administrativo' }
+        ]
+      }
+    ]
+  },
+  vendas: {
+    label: 'Vendas & CRM',
+    descricao: 'Leads, oportunidades, funil de vendas',
+    abas: [
+      { nome: 'Leads', colunas: ['nome','empresa','email','telefone','origem','status','valor_estimado','data_criacao'],
+        exemplo: [{ nome:'João Silva', empresa:'Tech LTDA', email:'joao@tech.com', telefone:'11999999999', origem:'Site', status:'qualificado', valor_estimado:15000, data_criacao:'2024-01-15' }]
+      },
+      { nome: 'Oportunidades', colunas: ['lead','empresa','etapa','valor','probabilidade','previsao_fechamento','status'],
+        exemplo: [{ lead:'João Silva', empresa:'Tech LTDA', etapa:'Proposta', valor:15000, probabilidade:70, previsao_fechamento:'2024-02-28', status:'aberta' }]
+      }
+    ]
+  },
+  rh: {
+    label: 'Recursos Humanos',
+    descricao: 'Funcionários, folha de pagamento, ponto',
+    abas: [
+      { nome: 'Funcionarios', colunas: ['nome','cargo','departamento','admissao','salario','status','email'],
+        exemplo: [{ nome:'Maria Souza', cargo:'Analista', departamento:'TI', admissao:'2022-03-01', salario:4500, status:'ativo', email:'maria@empresa.com' }]
+      },
+      { nome: 'Folha', colunas: ['funcionario','mes','ano','salario_bruto','inss','irrf','salario_liquido'],
+        exemplo: [{ funcionario:'Maria Souza', mes:1, ano:2024, salario_bruto:4500, inss:495, irrf:280, salario_liquido:3725 }]
+      }
+    ]
+  },
+  estoque: {
+    label: 'Estoque & Operações',
+    descricao: 'Produtos, movimentações, ordens de serviço',
+    abas: [
+      { nome: 'Produtos', colunas: ['codigo','nome','categoria','unidade','estoque_atual','estoque_minimo','preco_custo','preco_venda'],
+        exemplo: [{ codigo:'PROD001', nome:'Produto A', categoria:'Matéria Prima', unidade:'KG', estoque_atual:100, estoque_minimo:20, preco_custo:10, preco_venda:18 }]
+      },
+      { nome: 'Movimentacoes', colunas: ['data','produto','tipo','quantidade','motivo','responsavel'],
+        exemplo: [{ data:'2024-01-05', produto:'Produto A', tipo:'entrada', quantidade:50, motivo:'Compra NF 123', responsavel:'Carlos' }]
+      }
+    ]
+  },
+  kpis: {
+    label: 'KPIs & Indicadores',
+    descricao: 'Indicadores de desempenho por período',
+    abas: [
+      { nome: 'KPIs', colunas: ['nome','modulo','unidade','meta','descricao'],
+        exemplo: [
+          { nome:'Faturamento Mensal', modulo:'financeiro', unidade:'R$', meta:100000, descricao:'Receita total mensal' },
+          { nome:'NPS', modulo:'comercial', unidade:'pontos', meta:70, descricao:'Net Promoter Score' }
+        ]
+      },
+      { nome: 'Registros', colunas: ['kpi','data','valor','observacao'],
+        exemplo: [
+          { kpi:'Faturamento Mensal', data:'2024-01-31', valor:95000, observacao:'Abaixo da meta' },
+          { kpi:'NPS', data:'2024-01-31', valor:72, observacao:'Meta atingida' }
+        ]
+      }
+    ]
+  }
+}
+
+// ─── Helper: fetch com redirect ──────────────────────────────
+function fetchUrl(url) {
+  return new Promise((resolve, reject) => {
+    const mod = url.startsWith('https') ? https : http
+    mod.get(url, { headers: { 'User-Agent': 'FlowOS/1.0' } }, res => {
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location)
+        return fetchUrl(res.headers.location).then(resolve).catch(reject)
+      const chunks = []
+      res.on('data', c => chunks.push(c))
+      res.on('end', () => resolve(Buffer.concat(chunks)))
+      res.on('error', reject)
+    }).on('error', reject)
+  })
+}
+
+// ─── Helper: montar workbook formatado ───────────────────────
+function montarWorkbook(abas, titulo = 'FlowOS') {
+  const wb = XLSX.utils.book_new()
+  const capa = XLSX.utils.aoa_to_sheet([
+    [titulo.toUpperCase()],
+    [''],
+    ['Gerado em', new Date().toLocaleString('pt-BR')],
+    [''],
+    ['ABAS DISPONÍVEIS:'],
+    ...abas.map(a => [a.nome, `${a.dados.length} registros`])
+  ])
+  capa['!cols'] = [{ wch: 25 }, { wch: 40 }]
+  if (capa['A1']) capa['A1'].s = { font: { bold: true, sz: 14, color: { rgb: '0EA5E9' } } }
+  XLSX.utils.book_append_sheet(wb, capa, 'Início')
+  abas.forEach(({ nome, dados }) => {
+    if (!dados?.length) return
+    const ws = XLSX.utils.json_to_sheet(dados)
+    const nCols = Object.keys(dados[0]).length
+    for (let C = 0; C < nCols; C++) {
+      const cell = ws[XLSX.utils.encode_cell({ r: 0, c: C })]
+      if (cell) cell.s = { font: { bold: true, color: { rgb: 'FFFFFF' } }, fill: { fgColor: { rgb: '0E1420' } }, alignment: { horizontal: 'center' } }
+    }
+    ws['!cols'] = Array(nCols).fill({ wch: 20 })
+    XLSX.utils.book_append_sheet(wb, ws, nome.slice(0, 31))
+  })
+  return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx', cellStyles: true })
+}
+
+// ─── GET /export/powerbi-templates ───────────────────────────
+// Lista templates disponíveis
+router.get('/powerbi-templates', autenticar, (req, res) => {
+  res.json(Object.entries(TEMPLATES_BI).map(([id, t]) => ({
+    id, label: t.label, descricao: t.descricao,
+    abas: t.abas.map(a => ({ nome: a.nome, colunas: a.colunas }))
+  })))
+})
+
+// ─── GET /export/powerbi-modelo/:template ────────────────────
+// Baixa planilha modelo Excel para o cliente preencher
+router.get('/powerbi-modelo/:template', autenticar, (req, res) => {
+  const tpl = TEMPLATES_BI[req.params.template]
+  if (!tpl) return res.status(404).json({ error: 'Template não encontrado' })
+  const buffer = montarWorkbook(tpl.abas.map(a => ({ nome: a.nome, dados: a.exemplo })), `MODELO – ${tpl.label}`)
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+  res.setHeader('Content-Disposition', `attachment; filename="modelo_${req.params.template}.xlsx"`)
+  res.send(buffer)
+})
+
+// ─── POST /export/powerbi-from-upload ────────────────────────
+// Recebe Excel/CSV do cliente e gera workbook Power BI formatado
+router.post('/powerbi-from-upload', autenticar, uploadPlanilha.single('arquivo'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo enviado' })
+    const { titulo } = req.body
+    const wb = XLSX.read(req.file.buffer, { type: 'buffer', cellDates: true })
+    const abas = wb.SheetNames
+      .map(nome => ({ nome: nome.slice(0, 31), dados: XLSX.utils.sheet_to_json(wb.Sheets[nome], { defval: '' }) }))
+      .filter(a => a.dados.length > 0)
+    if (!abas.length) return res.status(400).json({ error: 'Planilha vazia ou sem dados' })
+    const nomeEmpresa = titulo || req.file.originalname.replace(/\.[^.]+$/, '')
+    const buffer = montarWorkbook(abas, nomeEmpresa)
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    res.setHeader('Content-Disposition', `attachment; filename="${nomeEmpresa.replace(/[^a-zA-Z0-9]/g,'_')}_PowerBI.xlsx"`)
+    res.send(buffer)
+  } catch (err) {
+    console.error('[POWERBI-UPLOAD]', err.message)
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// ─── POST /export/powerbi-from-sheets ────────────────────────
+// Importa Google Sheets público e gera workbook Power BI
+// A planilha precisa estar compartilhada como "qualquer pessoa com o link"
+router.post('/powerbi-from-sheets', autenticar, async (req, res) => {
+  try {
+    const { sheets_url, titulo } = req.body
+    if (!sheets_url) return res.status(400).json({ error: 'URL do Google Sheets obrigatória' })
+    const m = sheets_url.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/)
+    if (!m) return res.status(400).json({ error: 'URL inválida. Use o link de compartilhamento do Google Sheets.' })
+    const sheetId = m[1]
+    let buffer
+    try {
+      buffer = await fetchUrl(`https://docs.google.com/spreadsheets/d/${sheetId}/export?format=xlsx`)
+    } catch {
+      return res.status(400).json({ error: 'Não foi possível acessar a planilha. Verifique se está compartilhada publicamente.' })
+    }
+    const wb = XLSX.read(buffer, { type: 'buffer', cellDates: true })
+    const abas = wb.SheetNames
+      .map(nome => ({ nome: nome.slice(0, 31), dados: XLSX.utils.sheet_to_json(wb.Sheets[nome], { defval: '' }) }))
+      .filter(a => a.dados.length > 0)
+    if (!abas.length) return res.status(400).json({ error: 'Planilha vazia ou sem dados' })
+    const nomeEmpresa = titulo || 'Google_Sheets'
+    const bufferOut = montarWorkbook(abas, nomeEmpresa)
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    res.setHeader('Content-Disposition', `attachment; filename="${nomeEmpresa.replace(/[^a-zA-Z0-9]/g,'_')}_PowerBI.xlsx"`)
+    res.send(bufferOut)
+  } catch (err) {
+    console.error('[POWERBI-SHEETS]', err.message)
+    res.status(500).json({ error: err.message })
   }
 })
 

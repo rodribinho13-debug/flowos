@@ -13,6 +13,157 @@ const s = {
 
 const ICONES = ['📊','📈','📉','💰','👥','🏭','🔍','📋','🎯','⚙️','📦','🗓️']
 
+const TEMPLATE_ICONES = { financeiro:'💰', vendas:'🎯', rh:'👥', estoque:'📦', kpis:'📊' }
+
+function PowerBIImporter() {
+  const [aba,         setAba]         = useState('upload') // 'upload' | 'sheets' | 'template'
+  const [arquivo,     setArquivo]     = useState(null)
+  const [titulo,      setTitulo]      = useState('')
+  const [sheetsUrl,   setSheetsUrl]   = useState('')
+  const [templates,   setTemplates]   = useState([])
+  const [tplSel,      setTplSel]      = useState(null)
+  const [loading,     setLoading]     = useState(false)
+  const [erro,        setErro]        = useState('')
+  const [sucesso,     setSucesso]     = useState('')
+  const fileRef = useRef()
+
+  useEffect(() => {
+    exportApi.templates().then(setTemplates).catch(() => {})
+  }, [])
+
+  const reset = () => { setErro(''); setSucesso('') }
+
+  const handleUpload = async () => {
+    reset()
+    if (!arquivo) return setErro('Selecione um arquivo Excel ou CSV.')
+    setLoading(true)
+    try {
+      await exportApi.powerbiFromUpload(arquivo, titulo)
+      setSucesso('Workbook Power BI gerado e baixado!')
+    } catch(e) { setErro(e.message) }
+    finally { setLoading(false) }
+  }
+
+  const handleSheets = async () => {
+    reset()
+    if (!sheetsUrl.trim()) return setErro('Cole a URL do Google Sheets.')
+    setLoading(true)
+    try {
+      await exportApi.powerbiFromSheets(sheetsUrl.trim(), titulo)
+      setSucesso('Workbook Power BI gerado e baixado!')
+    } catch(e) { setErro(e.message) }
+    finally { setLoading(false) }
+  }
+
+  const baixarModelo = (id) => {
+    exportApi.baixarModelo(id)
+    setSucesso('Modelo baixado! Preencha e use o "Enviar Planilha" para gerar o Power BI.')
+  }
+
+  const inp = { padding:'10px 12px', background:'#080C14', border:`1px solid ${C.border}`, borderRadius:8, color:C.text, fontSize:13, fontFamily:'inherit', outline:'none', width:'100%' }
+
+  return (
+    <div style={{ background:'linear-gradient(135deg,rgba(14,165,233,0.05),rgba(16,185,129,0.05))', border:'1px solid rgba(14,165,233,0.2)', borderRadius:16, padding:28, marginBottom:24 }}>
+      <div style={{ fontFamily:'Syne,sans-serif', fontWeight:800, fontSize:18, color:C.text, marginBottom:4 }}>📊 Power BI — Importar dados externos</div>
+      <p style={{ fontSize:13, color:C.muted, margin:'4px 0 20px', lineHeight:1.6 }}>
+        Gere um workbook Power BI a partir da sua própria planilha, Google Sheets ou baixe um modelo pronto para preencher.
+      </p>
+
+      {/* Abas */}
+      <div style={{ display:'flex', gap:8, marginBottom:20 }}>
+        {[['upload','📁 Enviar planilha'],['sheets','🔗 Google Sheets'],['template','📋 Baixar modelo']].map(([id,label]) => (
+          <button key={id} onClick={() => { setAba(id); reset() }}
+            style={{ padding:'8px 16px', borderRadius:8, border:`1px solid ${aba===id ? C.accent : C.border}`, background: aba===id ? 'rgba(0,229,255,0.1)' : 'transparent', color: aba===id ? C.accent : C.muted, fontSize:12, fontWeight:700, cursor:'pointer', fontFamily:'inherit' }}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {/* Upload */}
+      {aba === 'upload' && (
+        <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
+          <div>
+            <label style={{ fontSize:12, color:C.muted, display:'block', marginBottom:5 }}>Título do relatório (opcional)</label>
+            <input value={titulo} onChange={e=>setTitulo(e.target.value)} placeholder="Ex: Financeiro Janeiro 2024" style={inp} />
+          </div>
+          <div>
+            <label style={{ fontSize:12, color:C.muted, display:'block', marginBottom:5 }}>Arquivo Excel ou CSV *</label>
+            <div style={{ display:'flex', gap:8, alignItems:'center' }}>
+              <div
+                onClick={() => fileRef.current.click()}
+                style={{ flex:1, padding:'14px 16px', background:'#080C14', border:`2px dashed ${arquivo ? C.accent : C.border}`, borderRadius:8, color: arquivo ? C.accent : C.muted, fontSize:13, cursor:'pointer', textAlign:'center' }}>
+                {arquivo ? `✅ ${arquivo.name}` : '📁 Clique para selecionar (.xlsx, .xls, .csv)'}
+              </div>
+              {arquivo && <button onClick={()=>{setArquivo(null);reset()}} style={{ padding:'8px 10px', background:'transparent', border:`1px solid ${C.border}`, borderRadius:8, color:C.muted, cursor:'pointer' }}>✕</button>}
+            </div>
+            <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" onChange={e=>{setArquivo(e.target.files?.[0]||null);reset()}} style={{ display:'none' }} />
+          </div>
+          <p style={{ fontSize:12, color:'#475569', margin:0 }}>O FlowOS lê todas as abas da planilha e gera um workbook formatado pronto para o Power BI Desktop.</p>
+        </div>
+      )}
+
+      {/* Google Sheets */}
+      {aba === 'sheets' && (
+        <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
+          <div>
+            <label style={{ fontSize:12, color:C.muted, display:'block', marginBottom:5 }}>Título do relatório (opcional)</label>
+            <input value={titulo} onChange={e=>setTitulo(e.target.value)} placeholder="Ex: Vendas Q1 2024" style={inp} />
+          </div>
+          <div>
+            <label style={{ fontSize:12, color:C.muted, display:'block', marginBottom:5 }}>URL do Google Sheets *</label>
+            <input value={sheetsUrl} onChange={e=>setSheetsUrl(e.target.value)}
+              placeholder="https://docs.google.com/spreadsheets/d/..."
+              style={{ ...inp, fontFamily:'monospace', fontSize:12 }} />
+          </div>
+          <div style={{ background:'rgba(255,255,255,0.02)', border:`1px solid ${C.border}`, borderRadius:8, padding:'10px 14px', fontSize:12, color:C.muted, lineHeight:1.7 }}>
+            ⚠️ A planilha precisa estar compartilhada como <strong style={{color:C.text}}>"Qualquer pessoa com o link pode visualizar"</strong>.
+            <br/>No Google Sheets: <strong style={{color:C.text}}>Compartilhar → Alterar → Qualquer pessoa com o link → Leitor</strong>
+          </div>
+        </div>
+      )}
+
+      {/* Templates */}
+      {aba === 'template' && (
+        <div>
+          <p style={{ fontSize:13, color:C.muted, marginBottom:14 }}>
+            Baixe um modelo Excel já estruturado, preencha com seus dados e envie pela aba "Enviar planilha" para gerar o Power BI.
+          </p>
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(190px,1fr))', gap:10 }}>
+            {templates.map(t => (
+              <div key={t.id} style={{ background:'rgba(255,255,255,0.02)', border:`1px solid ${C.border}`, borderRadius:10, padding:14 }}>
+                <div style={{ fontSize:22, marginBottom:8 }}>{TEMPLATE_ICONES[t.id] || '📊'}</div>
+                <div style={{ fontWeight:700, fontSize:13, color:C.text, marginBottom:4 }}>{t.label}</div>
+                <div style={{ fontSize:11, color:C.muted, marginBottom:10, lineHeight:1.5 }}>{t.descricao}</div>
+                <div style={{ fontSize:10, color:'#475569', marginBottom:10 }}>
+                  Abas: {t.abas.map(a => a.nome).join(', ')}
+                </div>
+                <button onClick={() => baixarModelo(t.id)}
+                  style={{ width:'100%', padding:'7px 0', background:'rgba(0,229,255,0.08)', border:'1px solid rgba(0,229,255,0.2)', borderRadius:6, color:C.accent, fontSize:11, fontWeight:700, cursor:'pointer', fontFamily:'inherit' }}>
+                  ⬇️ Baixar modelo
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Erro / Sucesso */}
+      {erro && <div style={{ background:'rgba(239,68,68,0.08)', border:'1px solid rgba(239,68,68,0.2)', borderRadius:8, padding:'9px 14px', marginTop:12, fontSize:12, color:'#EF4444' }}>{erro}</div>}
+      {sucesso && <div style={{ background:'rgba(16,185,129,0.08)', border:'1px solid rgba(16,185,129,0.2)', borderRadius:8, padding:'9px 14px', marginTop:12, fontSize:12, color:'#10B981' }}>{sucesso}</div>}
+
+      {/* Botão gerar */}
+      {aba !== 'template' && (
+        <div style={{ marginTop:16, display:'flex', justifyContent:'flex-end' }}>
+          <button onClick={aba==='upload' ? handleUpload : handleSheets} disabled={loading}
+            style={{ padding:'12px 28px', background: loading ? 'rgba(14,165,233,0.2)' : 'linear-gradient(135deg,#0ea5e9,#10b981)', border:'none', borderRadius:10, color:'#fff', fontWeight:800, fontSize:13, cursor: loading ? 'not-allowed':'pointer', fontFamily:'inherit', whiteSpace:'nowrap' }}>
+            {loading ? '⏳ Gerando...' : '⬇️ Gerar workbook Power BI'}
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function DashboardGenerator() {
   const [nome,    setNome]    = useState('')
   const [senha,   setSenha]   = useState('')
@@ -236,6 +387,9 @@ export default function Relatorios() {
           </div>
         ))}
       </div>
+
+      {/* Power BI — importar de planilha / Google Sheets */}
+      <PowerBIImporter />
 
       {/* Botão Power BI Workbook */}
       <div style={{ background: 'linear-gradient(135deg,rgba(0,229,255,0.06),rgba(124,58,237,0.06))', border: '1px solid rgba(0,229,255,0.2)', borderRadius: 16, padding: 28, marginBottom: 24, display: 'flex', alignItems: 'center', gap: 24 }}>
