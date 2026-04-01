@@ -207,6 +207,26 @@ export const exportApi = {
     a.href = URL.createObjectURL(blob)
     a.download = nome
     a.click()
+  },
+
+  gerarDashboardHTML: async (dados) => {
+    const res = await fetch(`${API_URL}/export/dashboard-html`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
+      body: JSON.stringify(dados)
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      throw new Error(err.error || 'Erro ao gerar dashboard')
+    }
+    const blob = await res.blob()
+    const header = res.headers.get('Content-Disposition') || ''
+    const nomeMatch = header.match(/filename="(.+)"/)
+    const nome = nomeMatch ? nomeMatch[1] : 'dashboard.html'
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = nome
+    a.click()
   }
 }
 

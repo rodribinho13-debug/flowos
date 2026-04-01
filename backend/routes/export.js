@@ -4,6 +4,7 @@ import * as XLSX from 'xlsx'
 import multer from 'multer'
 import fs from 'fs'
 import path from 'path'
+import crypto from 'crypto'
 import { fileURLToPath } from 'url'
 import supabase from '../services/supabase.js'
 import { autenticar } from './auth.js'
@@ -168,6 +169,192 @@ router.get('/powerbi-workbook', autenticar, async (req, res) => {
     res.send(buffer)
   } catch (err) {
     console.error('[POWERBI-WORKBOOK]', err.message)
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// ─── Gerador de Dashboard White-label ───────────────────────
+// POST /export/dashboard-html
+// Body: { senha, cor_primaria, logo_base64, nome_empresa, sections }
+// sections: [{ titulo, icone, relatorios: [{ nome, url }] }]
+// ─────────────────────────────────────────────────────────────
+function gerarHTMLDashboard({ hashSenha, cor_primaria, logo_base64, nome_empresa, sections }) {
+  const cor = cor_primaria || '#0ea5e9'
+  const sectionsJSON = JSON.stringify(sections || [])
+  const logoHTML = logo_base64
+    ? `<img src="${logo_base64}" alt="${nome_empresa}" style="height:52px;object-fit:contain;margin:0 auto 24px;display:block">`
+    : `<div style="width:52px;height:52px;border-radius:14px;background:${cor};display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:800;color:#fff;margin:0 auto 24px">${nome_empresa.charAt(0).toUpperCase()}</div>`
+  const sidebarLogoHTML = logo_base64
+    ? `<img src="${logo_base64}" alt="${nome_empresa}" style="height:34px;object-fit:contain">`
+    : `<div style="width:34px;height:34px;border-radius:10px;background:${cor};display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:800;color:#fff;flex-shrink:0">${nome_empresa.charAt(0).toUpperCase()}</div>`
+
+  return `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>${nome_empresa} – Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--brand:${cor}}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Inter',-apple-system,sans-serif;background:#0f172a;color:#e2e8f0}
+::-webkit-scrollbar{width:5px}
+::-webkit-scrollbar-track{background:#1e293b}
+::-webkit-scrollbar-thumb{background:var(--brand);border-radius:3px}
+#login-screen{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#0f172a;z-index:100}
+#dashboard{display:none;height:100vh;overflow:hidden}
+#sidebar{width:240px;background:#1e293b;display:flex;flex-direction:column;flex-shrink:0;height:100vh;overflow-y:auto;border-right:1px solid #0f172a}
+#main{flex:1;display:flex;flex-direction:column;min-width:0;height:100vh}
+#topbar{height:52px;background:#1e293b;border-bottom:1px solid #0f172a;display:flex;align-items:center;padding:0 20px;gap:12px;flex-shrink:0}
+#report-area{flex:1;background:#0f172a;display:flex;align-items:center;justify-content:center;position:relative}
+.report-frame{width:100%;height:100%;border:none;position:absolute;inset:0;display:none}
+.sidebar-link{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:500;color:#94a3b8;transition:all .15s;border:none;background:none;width:100%;text-align:left}
+.sidebar-link:hover{background:rgba(255,255,255,0.05);color:#e2e8f0}
+.sidebar-link.active{background:color-mix(in srgb,var(--brand) 15%,transparent);color:var(--brand)}
+.sec-title{display:flex;align-items:center;justify-content:space-between;padding:8px 12px;cursor:pointer;font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#475569;user-select:none}
+.sec-title:hover{color:#94a3b8}
+.chevron{transition:transform .2s;font-size:9px}
+.chevron.open{transform:rotate(90deg)}
+#overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:40}
+#hamburger{display:none;background:none;border:none;color:#64748b;cursor:pointer;font-size:22px;padding:2px 8px 2px 0}
+input[type=password]{width:100%;padding:13px 16px;background:#0f172a;border:1px solid #334155;border-radius:10px;color:#e2e8f0;font-size:14px;outline:none;margin-bottom:12px;font-family:inherit;transition:border-color .15s}
+input[type=password]:focus{border-color:var(--brand)}
+@media(max-width:768px){
+  #sidebar{transform:translateX(-100%);transition:transform .25s;position:fixed;z-index:50}
+  #sidebar.open{transform:translateX(0)}
+  #overlay.open{display:block}
+  #hamburger{display:block}
+}
+</style>
+</head>
+<body>
+
+<div id="login-screen">
+  <div style="width:100%;max-width:380px;padding:0 20px">
+    <div style="background:#1e293b;border:1px solid #334155;border-radius:20px;padding:40px 36px;text-align:center">
+      ${logoHTML}
+      <h1 style="font-size:20px;font-weight:700;color:#f1f5f9;margin:0 0 4px">${nome_empresa}</h1>
+      <p style="font-size:13px;color:#64748b;margin:0 0 28px">Central de Relatórios</p>
+      <div id="login-error" style="display:none;background:#7f1d1d22;border:1px solid #7f1d1d;color:#fca5a5;font-size:12px;padding:10px 14px;border-radius:8px;margin-bottom:16px">Senha incorreta. Tente novamente.</div>
+      <input type="password" id="pwd" placeholder="Digite sua senha" onkeydown="if(event.key==='Enter')doLogin()">
+      <button onclick="doLogin()" style="width:100%;padding:13px;background:var(--brand);border:none;border-radius:10px;color:#fff;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit">Entrar</button>
+      <p style="font-size:11px;color:#334155;margin:20px 0 0">Acesso restrito. Apenas usuários autorizados.</p>
+    </div>
+  </div>
+</div>
+
+<div id="dashboard" style="display:flex">
+  <div id="overlay" onclick="closeSidebar()"></div>
+  <aside id="sidebar">
+    <div style="padding:20px 16px 16px;border-bottom:1px solid #0f172a">
+      <div style="display:flex;align-items:center;gap:10px">
+        ${sidebarLogoHTML}
+        <span style="font-size:14px;font-weight:700;color:#f1f5f9;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${nome_empresa}</span>
+      </div>
+    </div>
+    <nav id="nav" style="flex:1;padding:12px 8px;overflow-y:auto"></nav>
+    <div style="padding:12px 16px;border-top:1px solid #0f172a">
+      <button onclick="doLogout()" style="width:100%;padding:8px;background:transparent;border:1px solid #1e3a5f;border-radius:8px;color:#64748b;font-size:12px;cursor:pointer;font-family:inherit">Sair</button>
+    </div>
+  </aside>
+  <main id="main">
+    <header id="topbar">
+      <button id="hamburger" onclick="toggleSidebar()">☰</button>
+      <div style="flex:1;font-size:14px;font-weight:600;color:#94a3b8" id="report-title">Selecione um relatório</div>
+      <div style="font-size:11px;color:#334155" id="session-info"></div>
+    </header>
+    <div id="report-area">
+      <div id="empty-state" style="text-align:center">
+        <div style="font-size:48px;margin-bottom:16px">📊</div>
+        <div style="font-size:16px;font-weight:600;color:#475569;margin-bottom:8px">Nenhum relatório selecionado</div>
+        <div style="font-size:13px;color:#334155">Escolha um relatório na barra lateral</div>
+      </div>
+      <iframe id="frame" class="report-frame" allowfullscreen></iframe>
+    </div>
+  </main>
+</div>
+
+<script>
+const HASH='${hashSenha}',TTL=4*60*60*1000,KEY='flos_ds';
+const SECTIONS=${sectionsJSON};
+
+async function sha256(m){const b=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(m));return Array.from(new Uint8Array(b)).map(x=>x.toString(16).padStart(2,'0')).join('')}
+
+async function doLogin(){
+  const p=document.getElementById('pwd').value;if(!p)return;
+  const h=await sha256(p);
+  if(h===HASH){
+    localStorage.setItem(KEY,JSON.stringify({ts:Date.now()}));
+    document.getElementById('login-screen').style.display='none';
+    document.getElementById('dashboard').style.display='flex';
+    buildNav();updateSession();
+  }else{document.getElementById('login-error').style.display='block';document.getElementById('pwd').value='';document.getElementById('pwd').focus();}
+}
+
+function doLogout(){localStorage.removeItem(KEY);location.reload()}
+
+function checkSession(){
+  try{const{ts}=JSON.parse(localStorage.getItem(KEY)||'{}');return Date.now()-ts<TTL;}catch{return false}
+}
+
+function updateSession(){
+  try{const{ts}=JSON.parse(localStorage.getItem(KEY));const e=new Date(ts+TTL);document.getElementById('session-info').textContent='Expira '+e.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});}catch{}
+}
+
+let activeUrl=null;
+function buildNav(){
+  const nav=document.getElementById('nav');nav.innerHTML='';
+  SECTIONS.forEach(sec=>{
+    const wrap=document.createElement('div');wrap.style.marginBottom='4px';
+    const title=document.createElement('div');title.className='sec-title';
+    title.innerHTML='<span>'+sec.titulo+'</span><span class="chevron open">▶</span>';
+    const list=document.createElement('div');
+    title.onclick=()=>{const o=list.style.display!=='none';list.style.display=o?'none':'block';title.querySelector('.chevron').classList.toggle('open',!o)};
+    (sec.relatorios||[]).forEach(r=>{
+      const btn=document.createElement('button');btn.className='sidebar-link'+(r.url===activeUrl?' active':'');
+      btn.innerHTML='<span style="font-size:14px">'+sec.icone+'</span><span>'+r.nome+'</span>';
+      btn.onclick=()=>loadReport(r.url,r.nome,btn);list.appendChild(btn);
+    });
+    wrap.appendChild(title);wrap.appendChild(list);nav.appendChild(wrap);
+  });
+}
+
+function loadReport(url,nome,btn){
+  activeUrl=url;document.querySelectorAll('.sidebar-link').forEach(b=>b.classList.remove('active'));btn.classList.add('active');
+  document.getElementById('report-title').textContent=nome;
+  const f=document.getElementById('frame');f.src=url;f.style.display='block';
+  document.getElementById('empty-state').style.display='none';
+  if(window.innerWidth<=768)closeSidebar();
+}
+
+function toggleSidebar(){document.getElementById('sidebar').classList.toggle('open');document.getElementById('overlay').classList.toggle('open')}
+function closeSidebar(){document.getElementById('sidebar').classList.remove('open');document.getElementById('overlay').classList.remove('open')}
+
+window.addEventListener('resize',()=>{if(window.innerWidth>768){document.getElementById('sidebar').classList.remove('open');document.getElementById('overlay').classList.remove('open')}});
+
+(function(){if(checkSession()){document.getElementById('login-screen').style.display='none';document.getElementById('dashboard').style.display='flex';buildNav();updateSession();}})();
+</script>
+</body>
+</html>`
+}
+
+router.post('/dashboard-html', autenticar, async (req, res) => {
+  try {
+    const { senha, cor_primaria, logo_base64, nome_empresa, sections } = req.body
+    if (!senha || !nome_empresa) return res.status(400).json({ error: 'senha e nome_empresa são obrigatórios' })
+    if (!Array.isArray(sections) || sections.length === 0) return res.status(400).json({ error: 'Adicione pelo menos uma seção' })
+
+    const hashSenha = crypto.createHash('sha256').update(senha).digest('hex')
+    const html = gerarHTMLDashboard({ hashSenha, cor_primaria, logo_base64, nome_empresa, sections })
+    const nomeArquivo = `${nome_empresa.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase()}_dashboard.html`
+
+    res.setHeader('Content-Type', 'text/html; charset=utf-8')
+    res.setHeader('Content-Disposition', `attachment; filename="${nomeArquivo}"`)
+    res.send(html)
+  } catch (err) {
+    console.error('[DASHBOARD-HTML]', err.message)
     res.status(500).json({ error: err.message })
   }
 })
